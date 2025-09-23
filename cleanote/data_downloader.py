@@ -16,7 +16,5 @@ class DataDownloader:
         self.limit = limit
 
     def fetch(self, ctx: Context) -> Iterable[Doc]:
-        """Stub: retourne bientôt un flux de Doc. Pour l’instant, yield rien."""
-        if False:
-            yield Doc(id="placeholder", text="")  # pour typer
-        return
+        """Stub : ne retourne aucun document pour le moment (itérateur vide)."""
+        return iter(())

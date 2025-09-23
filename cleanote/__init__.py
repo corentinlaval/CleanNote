@@ -1,26 +1,4 @@
-from typing import Any, Dict, List, Tuple, Optional
-from pydantic import BaseModel
+# cleanote/__init__.py
+"""CleanNote package."""
 
-
-class Doc(BaseModel):
-    id: str
-    text: str
-    meta: Dict[str, Any] = {}
-
-
-class Context(BaseModel):
-    run_id: str
-    params: Dict[str, Any] = {}
-    artifacts: Dict[str, Any] = {}  # rempli par ModelLoader
-
-
-class Issue(BaseModel):
-    code: str
-    message: str
-    severity: str  # "info" | "warn" | "error"
-    span: Optional[Tuple[int, int]] = None
-
-
-class Report(BaseModel):
-    doc_id: str
-    issues: List[Issue] = []
+__version__ = "0.0.1"

@@ -5,12 +5,15 @@ from .model_loader import ModelLoader
 from .homogeniser import Homogeniser
 from .verifier import Verifier
 
+
 class Pipeline:
-    def __init__(self,
-                 downloader: DataDownloader,
-                 homogeniser: Homogeniser,
-                 verifier: Optional[Verifier] = None,
-                 models: Optional[ModelLoader] = None) -> None:
+    def __init__(
+        self,
+        downloader: DataDownloader,
+        homogeniser: Homogeniser,
+        verifier: Optional[Verifier] = None,
+        models: Optional[ModelLoader] = None,
+    ) -> None:
         self.downloader = downloader
         self.homogeniser = homogeniser
         self.verifier = verifier

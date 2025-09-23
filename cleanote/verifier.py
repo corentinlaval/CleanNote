@@ -3,6 +3,7 @@ from .types import Doc, Context, Issue, Report
 
 Check = Callable[[Doc, Context], List[Issue]]
 
+
 class Verifier:
     def __init__(self, checks: List[Check]) -> None:
         self.checks = checks

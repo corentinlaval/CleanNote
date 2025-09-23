@@ -1,6 +1,7 @@
 from cleanote.types import Context
 from cleanote.model_loader import ModelLoader
 
+
 def test_model_loader_preload_updates_context():
     ml = ModelLoader(model_name="dummy")
     ctx = Context(run_id="t")

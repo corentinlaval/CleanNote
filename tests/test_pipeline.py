@@ -4,6 +4,7 @@ from cleanote.homogeniser import Homogeniser
 from cleanote.verifier import Verifier
 from cleanote.model_loader import ModelLoader
 
+
 # downloader factice
 class DummyDownloader:
     def __init__(self): ...
@@ -11,17 +12,21 @@ class DummyDownloader:
         yield Doc(id="d1", text="hello   world")
         yield Doc(id="d2", text="")
 
+
 # micro-étapes & checks minimalistes
 class NormalizeWhitespace:
     def __init__(self): ...
     def run(self, doc, ctx):
         import re
+
         return doc.copy(update={"text": re.sub(r"\s+", " ", doc.text).strip()})
+
 
 def check_not_empty(doc, ctx):
     if doc.text:
         return []
     return [Issue(code="empty", message="text is empty", severity="warn")]
+
 
 def test_pipeline_end_to_end():
     pipe = Pipeline(

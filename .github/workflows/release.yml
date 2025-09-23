@@ -1,16 +1,17 @@
-name: Release to TestPyPI
+name: Release to PyPI (token)
 
 on:
   push:
     tags:
-      - "test-v*.*.*"   # ex: test-v0.0.2
+      - "v*.*.*"   # ex: v0.0.2
 
 jobs:
-  publish-testpypi:
+  publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -22,10 +23,8 @@ jobs:
           pip install build
           python -m build
 
-      - name: Upload to TestPyPI
+      - name: Upload to PyPI (API token)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
           user: __token__
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          skip-existing: true 
+          password: ${{ secrets.PYPI_API_TOKEN }}

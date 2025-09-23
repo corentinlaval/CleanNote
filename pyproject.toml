@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cleanote"
+version = "0.0.1"
+description = "CleanNote: preprocessing and harmonization of medical notes"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2", "pyyaml", "typer", "rich"]
+
+[tool.ruff]
+line-length = 100

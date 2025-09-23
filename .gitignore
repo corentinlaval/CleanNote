@@ -22,3 +22,8 @@ env/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Coverage reports
+coverage.xml
+htmlcov/
+

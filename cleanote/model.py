@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Dict, Any
 from dataclasses import dataclass
+from .types import Context
 
 try:
     from transformers import pipeline  # type: ignore
@@ -79,7 +80,7 @@ class Model:
 
     # ---- Lifecycle -----------------------------------------------------------
 
-    def initialize(self) -> None:
+    def initialize(self, ctx: Optional["Context"] = None) -> None:
         """Load the HF pipeline."""
         print(
             f"[Model] Initializing HF pipeline (model='{self.name}', task='{self.task}', revision={self.revision})..."

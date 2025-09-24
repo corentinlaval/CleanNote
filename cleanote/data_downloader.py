@@ -21,30 +21,23 @@ class DataDownloader:
         split: str = "train",
         text_field: str = "text",
         limit: Optional[int] = None,
-        revision: Optional[str] = None,
-        streaming: bool = False,
     ) -> None:
         self.hf_dataset_name = hf_dataset_name
         self.split = split
         self.text_field = text_field
         self.limit = limit
-        self.revision = revision
-        self.streaming = streaming
 
     def fetch(self, ctx: Context) -> Iterable[Doc]:
         """Download a Hugging Face dataset and yield Doc objects."""
         from datasets import load_dataset
 
         print(
-            f"[DataDownloader] Loading dataset '{self.hf_dataset_name}' "
-            f"(split='{self.split}', revision='{self.revision}', streaming={self.streaming})..."
+            f"[DataDownloader] Loading dataset '{self.hf_dataset_name}' (split='{self.split}', text_field='{self.text_field}')..."
         )
 
         ds = load_dataset(
             path=self.hf_dataset_name,
             split=self.split,
-            revision=self.revision,
-            streaming=self.streaming,
         )
 
         count = 0

@@ -4,7 +4,7 @@ from .types import Doc, Context
 
 
 def _get_by_path(row: dict, path: str):
-    """Permet d'utiliser une dot-notation: ex. 'record.text'."""
+    """Allows dot-notation to extract nested fields, e.g. 'record.text'."""
     cur = row
     for p in path.split("."):
         if isinstance(cur, dict) and p in cur:
@@ -32,10 +32,13 @@ class DataDownloader:
         self.streaming = streaming
 
     def fetch(self, ctx: Context) -> Iterable[Doc]:
-        """Télécharge un dataset Hugging Face et renvoie un flux de Doc."""
-        from datasets import (
-            load_dataset,
-        )  # import local pour ne pas forcer la dépendance
+        """Download a Hugging Face dataset and yield Doc objects."""
+        from datasets import load_dataset
+
+        print(
+            f"[DataDownloader] Loading dataset '{self.hf_dataset_name}' "
+            f"(split='{self.split}', revision='{self.revision}', streaming={self.streaming})..."
+        )
 
         ds = load_dataset(
             path=self.hf_dataset_name,
@@ -57,6 +60,9 @@ class DataDownloader:
             if not isinstance(text, str):
                 continue
 
+            if count == 0:
+                print(f"[DataDownloader] First row example: {row}")
+
             yield Doc(
                 id=f"{self.hf_dataset_name}:{self.split}:{i}",
                 text=text,
@@ -70,3 +76,5 @@ class DataDownloader:
             count += 1
             if self.limit is not None and count >= self.limit:
                 break
+
+        print(f"[DataDownloader] Finished. Yielded {count} documents.")

@@ -39,7 +39,7 @@ class Pipeline:
             print(f"[Pipeline] Homogenisation done for {doc.id}")
 
             if self.verifier:
-                d, rep = self.verifier.run(d, ctx)
+                d, rep = self.verifier.run(self.models, d, ctx)
                 reports.append(rep)
                 print(
                     f"[Pipeline] Verification done for {doc.id} with {len(rep.issues)} issues"

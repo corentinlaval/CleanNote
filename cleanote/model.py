@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Iterable, List, Optional, Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 try:
     from transformers import pipeline  # type: ignore

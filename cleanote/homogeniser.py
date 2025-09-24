@@ -7,6 +7,7 @@ class Homogeniser:
     def run(
         self, model_loader: ModelLoader, docs: Union[Doc, List[Doc]], ctx: Context
     ) -> Union[Doc, List[Doc]]:
+
         # 1) Initialize the model loader
         model_name = getattr(model_loader, "name", model_loader.__class__.__name__)
         print(f"[Homogeniser] Initializing model loader '{model_name}'...")

@@ -15,14 +15,22 @@ class Homogeniser:
         print("[Homogeniser] Initialization completed.\n")
 
         # 2) Normalize input to a list for consistent handling
-        is_single = not isinstance(docs, Iterable) or isinstance(docs, Doc)
+        is_single = isinstance(docs, Doc)
         in_docs = [docs] if is_single else list(docs)
         print(
             f"[Homogeniser] Sending {len(in_docs)} document(s) to the model loader..."
         )
 
-        # 3) Send documents to the model loader
-        out_docs = in_docs  # [model_loader.transform(d, ctx) for d in in_docs]
+        # 3) Send documents to the model loader with a prompt
+        out_docs = []
+        for d in in_docs:
+            # Construire un prompt très simple
+            prompt = f"Count the number of words in the following text:\n\n{d.text}"
+            # Transformer le Doc en un nouveau Doc via le modèle
+            transformed = model_loader.transform(
+                Doc(id=d.id, text=prompt, meta=d.meta), ctx
+            )
+            out_docs.append(transformed)
 
         # 4) Return output
         print(f"[Homogeniser] Model loader returned {len(out_docs)} document(s).")

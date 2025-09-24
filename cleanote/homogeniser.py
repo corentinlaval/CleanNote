@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import List, Protocol, Optional, Callable
 from .types import Doc, Context
-from .model_loader import ModelLoader  # pour le futur, on ne l'utilise qu'en stub
+#from .model_loader import ModelLoader  # pour le futur, on ne l'utilise qu'en stub
 
 
 class _Step(Protocol):

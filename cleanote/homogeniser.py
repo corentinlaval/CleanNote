@@ -1,6 +1,8 @@
 # cleanote/homogeniser.py
-from typing import List, Protocol, Callable, Optional
+from __future__ import annotations
+from typing import List, Protocol, Optional, Callable
 from .types import Doc, Context
+from .model_loader import ModelLoader  # pour le futur, on ne l'utilise qu'en stub
 
 
 class _Step(Protocol):
@@ -8,39 +10,58 @@ class _Step(Protocol):
 
 
 class Homogeniser:
-    """
-    Applies a list of steps sequentially to a Doc.
-    - Keeps your original API.
-    - Optional verbose logs.
-    - Optional on_step callback for tracing/metrics.
-    """
+    """Step-based homogeniser (API existante)."""
 
-    def __init__(
-        self,
-        steps: List[_Step],
-        *,
-        verbose: bool = False,
-        on_step: Optional[Callable[[str, Doc, Doc, Context], None]] = None,
-    ) -> None:
+    def __init__(self, steps: List[_Step]) -> None:
         self.steps = steps
-        self.verbose = verbose
-        self.on_step = on_step
 
     def run(self, doc: Doc, ctx: Context) -> Doc:
         out = doc
-        if self.verbose:
-            print(f"[Homogeniser] Start doc {doc.id}")
         for s in self.steps:
-            before = out
             out = s.run(out, ctx)
-            if self.verbose:
-                print(
-                    f"  [Step] {s.__class__.__name__}: "
-                    f"{(before.text[:60] if before.text else '')!r} -> "
-                    f"{(out.text[:60] if out.text else '')!r}"
-                )
-            if self.on_step:
-                self.on_step(s.__class__.__name__, before, out, ctx)
-        if self.verbose:
-            print(f"[Homogeniser] Done doc {doc.id}")
         return out
+
+    # ---------- NOUVEAU : mode batch verbeux ----------
+    @classmethod
+    def from_docs_and_model(
+        cls,
+        docs: List[Doc],
+        model_name: str,
+        verbose: bool = True,
+    ) -> "HomogeniserBatch":
+        """
+        Fabrique un runner batch verbeux qui:
+        - ne fait aucun vrai traitement,
+        - loggue les étapes (démarrage, 'chargement' modèle, progression, fin),
+        - retourne les docs inchangés.
+        """
+        return HomogeniserBatch(docs=docs, model_name=model_name, verbose=verbose)
+
+
+class HomogeniserBatch:
+    """Batch runner verbeux (stub ML + prompt)."""
+
+    def __init__(self, docs: List[Doc], model_name: str, verbose: bool = True) -> None:
+        self.docs = docs
+        self.model_name = model_name
+        self.verbose = verbose
+
+    def run(self, ctx: Context) -> List[Doc]:
+        n = len(self.docs)
+        if self.verbose:
+            print(f"[Homogeniser] Démarrage de l'homogénéisation | {n} document(s)")
+            print(f"[Homogeniser] Chargement du modèle '{self.model_name}' (stub) ...")
+
+        # Stub: on ne charge rien vraiment, on pourrait poser un placeholder dans le contexte
+        ctx.artifacts.setdefault("_homogeniser_model_name", self.model_name)
+
+        out_docs: List[Doc] = []
+        for i, d in enumerate(self.docs, start=1):
+            if self.verbose:
+                print(f"[Homogeniser] Traitement du document {i}/{n} (id={d.id})")
+            # Aucun vrai traitement pour l’instant → identité
+            out_docs.append(d)
+
+        if self.verbose:
+            print(f"[Homogeniser] Fin de traitement des documents ({n}/{n})")
+        return out_docs

@@ -25,7 +25,7 @@ class Pipeline:
 
         if self.models:
             print("[Pipeline] Preloading models...")
-            self.models.preload(ctx)
+            self.models.initialize(ctx)
             print("[Pipeline] Models loaded into context.")
 
         docs_out: List[Doc] = []

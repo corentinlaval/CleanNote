@@ -11,15 +11,11 @@ def test_data_downloader_attributes_are_set():
         split="valid",
         text_field="note",
         limit=1,
-        revision="main",
-        streaming=False,
     )
     assert d.hf_dataset_name == "org/name"
     assert d.split == "valid"
     assert d.text_field == "note"
     assert d.limit == 1
-    assert d.revision == "main"
-    assert d.streaming is False
 
 
 def test_data_downloader_fetch_empty_when_text_field_missing(monkeypatch):
@@ -50,7 +46,7 @@ def test_data_downloader_fetch_returns_docs_and_respects_limit(monkeypatch):
         {"text": "third row"},
     ]
 
-    def fake_load_dataset(path, split, revision=None, streaming=False):
+    def fake_load_dataset(path, split):
         # Simule un iterable (streaming=False => on itère quand même dessus dans notre code)
         return rows
 

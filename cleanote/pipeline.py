@@ -2,7 +2,7 @@
 from typing import List, Optional, Tuple
 from .types import Doc, Context, Report
 from .data_downloader import DataDownloader
-from .model_loader import ModelLoader
+from .model import Model
 from .homogeniser import Homogeniser
 from .verifier import Verifier
 
@@ -13,7 +13,7 @@ class Pipeline:
         downloader: DataDownloader,
         homogeniser: Homogeniser,
         verifier: Optional[Verifier] = None,
-        models: Optional[ModelLoader] = None,
+        models: Optional[Model] = None,
     ) -> None:
         self.downloader = downloader
         self.homogeniser = homogeniser

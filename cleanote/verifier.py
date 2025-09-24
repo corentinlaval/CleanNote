@@ -1,16 +1,16 @@
 from typing import Iterable, Union
 from .types import Doc, Context
-from .model_loader import ModelLoader
+from .model import Model
 
 
 class Verifier:
     def run(
         self,
-        model_loader: ModelLoader,
+        model_loader: Model,
         docs: Union[Doc, Iterable[Doc]],
         ctx: Context,
     ) -> Union[Doc, Iterable[Doc]]:
-        print(f"[Verifier] Initializing model loader '{model_loader.model_name}'...")
+        print(f"[Verifier] Initializing model loader '{model_loader.name}'...")
         model_loader.initialize()
         print("[Verifier] Initialization completed.\n")
 

@@ -32,18 +32,14 @@ class DataDownloader:
         from datasets import load_dataset
 
         print(
-            f"[DataDownloader] Loading dataset '{self.hf_dataset_name}' (split='{self.split}', text_field='{self.text_field}')..."
+            f"[DataDownloader] Loading dataset '{self.hf_dataset_name}' "
+            f"(split='{self.split}', text_field='{self.text_field}')..."
         )
 
-        ds = load_dataset(
-            path=self.hf_dataset_name,
-            split=self.split,
-        )
+        ds = load_dataset(path=self.hf_dataset_name, split=self.split)
 
         count = 0
-        iterator = iter(ds) if self.streaming else (row for row in ds)
-
-        for i, row in enumerate(iterator):
+        for i, row in enumerate(ds):
             text = None
             try:
                 text = _get_by_path(dict(row), self.text_field)

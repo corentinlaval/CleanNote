@@ -1,9 +1,6 @@
-from typing import List, Callable
-from .types import Doc, Context, Issue
-from .model_loader import ModelLoader
 from typing import Iterable, Union
-
-Check = Callable[[Doc, Context], List[Issue]]
+from .types import Doc, Context
+from .model_loader import ModelLoader
 
 
 class Verifier:

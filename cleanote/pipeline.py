@@ -35,7 +35,7 @@ class Pipeline:
         for doc in self.downloader.fetch(ctx):
             print(f"[Pipeline] Processing document {doc.id}")
 
-            d = self.homogeniser.run(doc, self.models, ctx)
+            d = self.homogeniser.run(self.models, doc, ctx)
             print(f"[Pipeline] Homogenisation done for {doc.id}")
 
             if self.verifier:

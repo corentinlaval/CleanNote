@@ -24,7 +24,7 @@ class Homogeniser:
         )
 
         # 3) Send documents to the model loader
-        out_docs = [model_loader.transform(d, ctx) for d in in_docs]
+        out_docs = in_docs  # [model_loader.transform(d, ctx) for d in in_docs]
 
         # 4) Return output
         print(f"[Homogeniser] Model loader returned {len(out_docs)} document(s).")

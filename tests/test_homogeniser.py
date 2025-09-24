@@ -1,34 +1,45 @@
+# tests/test_homogeniser.py
+import pytest
 from cleanote.types import Doc, Context
 from cleanote.homogeniser import Homogeniser
+from cleanote.model_loader import ModelLoader
 
 
-# micro-étape de démo (si tu n’en as pas encore dans ton fichier)
-class NormalizeWhitespace:
-    def __init__(self, keep_double_newlines=True):
-        self.keep = keep_double_newlines
+def test_homogeniser_with_single_doc(capsys):
+    ctx = Context(run_id="test")
+    doc = Doc(id="1", text="hello")
 
-    def run(self, doc, ctx):
-        import re
+    ml = ModelLoader("dummy")
+    hom = Homogeniser()
 
-        t = doc.text
-        t = re.sub(r"[ \t]+", " ", t)
-        if self.keep:
-            t = re.sub(r"\n{3,}", "\n\n", t)
-        else:
-            t = re.sub(r"\s+", " ", t)
-        return doc.copy(update={"text": t})
+    out = hom.run(ml, doc, ctx)
 
+    # ✅ output
+    assert isinstance(out, Doc)
+    assert out.text == "hello"
 
-def test_normalize_whitespace_unit():
-    doc = Doc(id="1", text="a   b\t\tc")
-    out = NormalizeWhitespace(keep_double_newlines=False).run(
-        doc, Context(run_id="t", params={})
-    )
-    assert out.text == "a b c"
+    # ✅ logs
+    captured = capsys.readouterr().out
+    assert "[Homogeniser] Initializing model loader" in captured
+    assert "Sending 1 document(s)" in captured
+    assert "[Homogeniser] Done." in captured
 
 
-def test_homogeniser_sequence():
-    h = Homogeniser([NormalizeWhitespace()])
-    doc = Doc(id="1", text="a   b")
-    out = h.run(doc, Context(run_id="t", params={}))
-    assert out.text == "a b"
+def test_homogeniser_with_multiple_docs(capsys):
+    ctx = Context(run_id="test")
+    docs = [Doc(id="1", text="foo"), Doc(id="2", text="bar")]
+
+    ml = ModelLoader("dummy")
+    hom = Homogeniser()
+
+    out = hom.run(ml, docs, ctx)
+
+    # output
+    assert isinstance(out, list)
+    assert len(out) == 2
+    assert all(isinstance(d, Doc) for d in out)
+
+    # logs
+    captured = capsys.readouterr().out
+    assert "Sending 2 document(s)" in captured
+    assert "Model loader returned 2 document(s)" in captured

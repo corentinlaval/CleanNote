@@ -41,7 +41,9 @@ class Pipeline:
             if self.verifier:
                 d, rep = self.verifier.run(d, ctx)
                 reports.append(rep)
-                print(f"[Pipeline] Verification done for {doc.id} with {len(rep.issues)} issues")
+                print(
+                    f"[Pipeline] Verification done for {doc.id} with {len(rep.issues)} issues"
+                )
 
             docs_out.append(d)
 

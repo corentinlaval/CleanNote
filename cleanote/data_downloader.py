@@ -33,7 +33,9 @@ class DataDownloader:
 
     def fetch(self, ctx: Context) -> Iterable[Doc]:
         """Télécharge un dataset Hugging Face et renvoie un flux de Doc."""
-        from datasets import load_dataset  # import local pour ne pas forcer la dépendance
+        from datasets import (
+            load_dataset,
+        )  # import local pour ne pas forcer la dépendance
 
         ds = load_dataset(
             path=self.hf_dataset_name,
@@ -58,7 +60,11 @@ class DataDownloader:
             yield Doc(
                 id=f"{self.hf_dataset_name}:{self.split}:{i}",
                 text=text,
-                meta={"source": "hf", "dataset": self.hf_dataset_name, "split": self.split},
+                meta={
+                    "source": "hf",
+                    "dataset": self.hf_dataset_name,
+                    "split": self.split,
+                },
             )
 
             count += 1

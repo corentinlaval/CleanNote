@@ -1,5 +1,3 @@
-# tests/test_homogeniser.py
-import pytest
 from cleanote.types import Doc, Context
 from cleanote.homogeniser import Homogeniser
 from cleanote.model_loader import ModelLoader
@@ -14,11 +12,11 @@ def test_homogeniser_with_single_doc(capsys):
 
     out = hom.run(ml, doc, ctx)
 
-    # ✅ output
+    # output
     assert isinstance(out, Doc)
     assert out.text == "hello"
 
-    # ✅ logs
+    # logs
     captured = capsys.readouterr().out
     assert "[Homogeniser] Initializing model loader" in captured
     assert "Sending 1 document(s)" in captured

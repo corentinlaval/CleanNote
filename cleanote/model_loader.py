@@ -11,5 +11,8 @@ class ModelLoader:
         # Exemple plus tard: self._cache["rules"] = load_rules(self.model_name)
         ctx.artifacts.update(self._cache)
 
+    def initialize(self) -> None:
+        return
+
     def get(self, key: str):
         return self._cache.get(key)

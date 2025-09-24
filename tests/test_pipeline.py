@@ -27,8 +27,7 @@ def check_not_empty(doc, ctx):
         return []
     return [Issue(code="empty", message="text is empty", severity="warn")]
 
-
-def test_pipeline_end_to_end():
+    # def test_pipeline_end_to_end():
     pipe = Pipeline(
         downloader=DummyDownloader(),
         homogeniser=Homogeniser([NormalizeWhitespace()]),

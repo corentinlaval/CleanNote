@@ -1,3 +1,4 @@
+# cleanote/pipeline.py
 from typing import List, Optional, Tuple
 from .types import Doc, Context, Report
 from .data_downloader import DataDownloader
@@ -20,14 +21,29 @@ class Pipeline:
         self.models = models
 
     def run(self, ctx: Context) -> Tuple[List[Doc], List[Report]]:
+        print("[Pipeline] Starting pipeline execution...")
+
         if self.models:
+            print("[Pipeline] Preloading models...")
             self.models.preload(ctx)
+            print("[Pipeline] Models loaded into context.")
+
         docs_out: List[Doc] = []
         reports: List[Report] = []
+
+        print("[Pipeline] Fetching documents from DataDownloader...")
         for doc in self.downloader.fetch(ctx):
+            print(f"[Pipeline] Processing document {doc.id}")
+
             d = self.homogeniser.run(doc, ctx)
+            print(f"[Pipeline] Homogenisation done for {doc.id}")
+
             if self.verifier:
                 d, rep = self.verifier.run(d, ctx)
                 reports.append(rep)
+                print(f"[Pipeline] Verification done for {doc.id} with {len(rep.issues)} issues")
+
             docs_out.append(d)
+
+        print(f"[Pipeline] Finished. {len(docs_out)} documents processed.")
         return docs_out, reports

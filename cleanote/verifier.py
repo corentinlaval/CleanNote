@@ -1,5 +1,5 @@
 from typing import List, Callable
-from .types import Doc, Context, Issue, Report
+from .types import Doc, Context, Issue
 from .model_loader import ModelLoader
 from typing import Iterable, Union
 

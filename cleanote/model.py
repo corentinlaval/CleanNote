@@ -23,6 +23,8 @@ class Model:
         self._model = None
         self._pipe = None
 
+        self.load()
+
     def load(self) -> None:
         """Télécharge le modèle & le tokenizer depuis Hugging Face et prépare le pipeline."""
         if self._pipe is not None:

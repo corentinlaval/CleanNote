@@ -3,15 +3,20 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import copy
 
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    pipeline,
+)
 
 
 class Model:
     """
-    Modèle Hugging Face générique :
+    Modèle Hugging Face (DataFrame-only) :
       - name  : repo_id (ex: 'gpt2', 'google/flan-t5-small', ...)
-      - task  : tâche du pipeline (ex: 'text-generation', 'text2text-generation', ...)
-      - params: kwargs passés au pipeline / génération (ex: max_new_tokens, temperature, ...)
+      - task  : 'text-generation' (causal LM) ou 'text2text-generation' (seq2seq), etc.
+      - params: kwargs passés au pipeline/génération (ex: max_new_tokens, temperature, ...)
     """
 
     def __init__(self, name: str, task: str = "text-generation", **params: Any):
@@ -32,16 +37,21 @@ class Model:
 
         print(f"[Model] Loading model '{self.name}' for task '{self.task}'...")
         self._tokenizer = AutoTokenizer.from_pretrained(self.name)
-        # Pour les tâches autres que causal LM, tu peux adapter ici le type de modèle
-        self._model = AutoModelForCausalLM.from_pretrained(self.name)
+
+        # Choix du type de modèle selon la tâche
+        if self.task in {"text2text-generation", "summarization", "translation"}:
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.name)
+        else:
+            self._model = AutoModelForCausalLM.from_pretrained(self.name)
+
         self._pipe = pipeline(self.task, model=self._model, tokenizer=self._tokenizer)
         print("[Model] Load completed.")
 
     def _apply_to_texts(self, texts: List[str], prompt: str) -> List[str]:
         """
-        Applique le modèle à une liste de textes et retourne UNIQUEMENT la sortie (réponse au prompt).
-        - Pour 'text-generation', on concatène prompt + texte et on isole la partie générée.
-        - Pour autres tâches, on normalise pour obtenir une chaîne finale.
+        Applique le modèle à une liste de textes et retourne UNIQUEMENT la réponse au prompt.
+        - 'text-generation' : concatène prompt + texte, isole la partie générée.
+        - 'text2text-generation' et assimilés : retourne la séquence générée.
         """
         if self._pipe is None:
             self.load()
@@ -51,18 +61,14 @@ class Model:
 
         for txt in texts:
             inp = f"{prompt}\n\n{txt}".strip()
-
             result = self._pipe(inp, **infer_kwargs)
 
             if self.task == "text-generation":
-                # Liste de dicts avec 'generated_text'
                 gen = result[0].get("generated_text", "")
-                # Heuristique: retirer l'input de la sortie si présent
                 if gen.startswith(inp):
                     gen = gen[len(inp) :].lstrip("\n")
                 outputs.append(gen)
             else:
-                # Normalisation générique
                 if isinstance(result, list):
                     val = (
                         result[0].get("generated_text")
@@ -79,64 +85,39 @@ class Model:
 
     def run(self, dataset, prompt: str):
         """
-        Applique le modèle au dataset et RENVOIE un NOUVEAU dataset du même type
-        (dict ou DataFrame) où les valeurs sont REMPLACÉES par la réponse au prompt.
+        Applique le modèle au dataset (DataFrame uniquement) et renvoie un NOUVEAU dataset
+        où la colonne `dataset.field` est REMPLACÉE par la réponse au prompt.
         """
         if not hasattr(dataset, "data"):
             raise ValueError("Le dataset fourni n'a pas d'attribut 'data'.")
 
-        # Copier l'objet sans relancer d'__init__
+        # Vérifier que c'est bien un DataFrame
+        is_df = hasattr(dataset.data, "iloc") and hasattr(dataset.data, "columns")
+        if not is_df:
+            raise TypeError("Le dataset.data doit être un pandas.DataFrame.")
+
+        if not hasattr(dataset, "field"):
+            raise ValueError("Le dataset DataFrame doit définir l'attribut 'field'.")
+
+        df = dataset.data.copy()
+        if dataset.field not in df.columns:
+            raise KeyError(
+                f"Colonne '{dataset.field}' introuvable dans le DataFrame. "
+                f"Colonnes dispo: {list(df.columns)}"
+            )
+
+        texts = df[dataset.field].astype(str).tolist()
+        outs = self._apply_to_texts(texts, prompt)
+
+        # Remplacement pur (la colonne 'index' reste intacte)
+        df[dataset.field] = outs
+
+        # Retourner une copie superficielle du Dataset avec le DF mis à jour
         result_ds = copy.copy(dataset)
+        result_ds.data = df
+        if hasattr(result_ds, "limit"):
+            result_ds.limit = len(df)
+        if hasattr(result_ds, "name"):
+            result_ds.name = f"{getattr(dataset, 'name', 'dataset')}__{self.name}"
 
-        # --- Cas dict {index: texte} ---
-        if isinstance(dataset.data, dict):
-            items = sorted(dataset.data.items(), key=lambda kv: kv[0])
-            indices = [i for i, _ in items]
-            texts = [str(t) for _, t in items]
-
-            outs = self._apply_to_texts(texts, prompt)
-            result_ds.data = {i: o for i, o in zip(indices, outs)}
-
-            if hasattr(result_ds, "limit"):
-                result_ds.limit = len(result_ds.data)
-            if hasattr(result_ds, "name"):
-                result_ds.name = f"{getattr(dataset, 'name', 'dataset')}__{self.name}"
-            return result_ds
-
-        # --- Cas DataFrame ---
-        try:
-            is_df = hasattr(dataset.data, "iloc") and hasattr(dataset.data, "columns")
-        except Exception:
-            is_df = False
-
-        if is_df:
-            if not hasattr(dataset, "field"):
-                raise ValueError(
-                    "Le dataset de type DataFrame doit définir l'attribut 'field'."
-                )
-
-            df = dataset.data.copy()
-            if dataset.field not in df.columns:
-                raise KeyError(
-                    f"Colonne '{dataset.field}' introuvable dans le DataFrame. "
-                    f"Colonnes dispo: {list(df.columns)}"
-                )
-
-            texts = df[dataset.field].astype(str).tolist()
-            outs = self._apply_to_texts(texts, prompt)
-
-            # Remplacement pur par le résultat du prompt
-            df[dataset.field] = outs
-            result_ds.data = df
-
-            if hasattr(result_ds, "limit"):
-                result_ds.limit = len(df)
-            if hasattr(result_ds, "name"):
-                result_ds.name = f"{getattr(dataset, 'name', 'dataset')}__{self.name}"
-            return result_ds
-
-        # Type non géré
-        raise TypeError(
-            "Type de dataset.data non pris en charge. Utilise un dict {index: texte} "
-            "ou un pandas.DataFrame avec la colonne 'field'."
-        )
+        return result_ds

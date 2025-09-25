@@ -36,7 +36,7 @@ def test_download_happy_path(monkeypatch):
         rows = [{"text": f"note {i}", "other": i} for i in range(5)]
         return make_stream_iter(rows)
 
-    monkeypatch.setattr("dataset.load_dataset", fake_load_dataset)
+    monkeypatch.setattr("cleanote.dataset.load_dataset", fake_load_dataset)
 
     ds = Dataset(name="dummy/repo", split="train", field="text", limit=3)
 
@@ -67,7 +67,7 @@ def test_download_missing_field_raises(monkeypatch):
         ]
         return make_stream_iter(rows)
 
-    monkeypatch.setattr("dataset.load_dataset", fake_load_dataset)
+    monkeypatch.setattr("cleanote.dataset.load_dataset", fake_load_dataset)
 
     ds = Dataset.__new__(Dataset)  # on bypasse __init__ pour contrôler les attributs
     ds.name = "dummy/repo"

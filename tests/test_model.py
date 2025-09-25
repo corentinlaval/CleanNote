@@ -69,15 +69,18 @@ def patch_transformers(monkeypatch):
         return PipelineRecorder(task, model, tokenizer, **kwargs)
 
     monkeypatch.setattr(
-        "model.AutoTokenizer.from_pretrained", fake_auto_tokenizer_from_pretrained
+        "cleanote.model.AutoTokenizer.from_pretrained",
+        fake_auto_tokenizer_from_pretrained,
     )
     monkeypatch.setattr(
-        "model.AutoModelForCausalLM.from_pretrained", fake_causal_from_pretrained
+        "cleanote.model.AutoModelForCausalLM.from_pretrained",
+        fake_causal_from_pretrained,
     )
     monkeypatch.setattr(
-        "model.AutoModelForSeq2SeqLM.from_pretrained", fake_seq2seq_from_pretrained
+        "cleanote.model.AutoModelForSeq2SeqLM.from_pretrained",
+        fake_seq2seq_from_pretrained,
     )
-    monkeypatch.setattr("model.pipeline", fake_pipeline)
+    monkeypatch.setattr("cleanote.model.pipeline", fake_pipeline)
 
     return created
 

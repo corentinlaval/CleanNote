@@ -1,5 +1,6 @@
 from datasets import load_dataset
 import pandas as pd
+from itertools import islice
 
 
 class Dataset:
@@ -14,13 +15,21 @@ class Dataset:
 
     def download(self):
         print(
-            f"[Dataset] Downloading {self.limit} rows from '{self.name}' ({self.split})..."
+            f"[Dataset] Streaming {self.limit} rows from '{self.name}' ({self.split})..."
         )
 
-        dataset = load_dataset(self.name, split=f"{self.split}[:{self.limit}]")
-        texts = dataset[self.field]
+        # streaming=True => lit ligne par ligne à distance
+        ds_iter = load_dataset(self.name, split=self.split, streaming=True)
 
-        # DataFrame avec deux colonnes : index + texte
-        self.data = pd.DataFrame({"index": range(len(texts)), self.field: texts})
+        rows = []
+        for i, row in islice(enumerate(ds_iter), self.limit):
+            if self.field not in row:
+                raise KeyError(
+                    f"Le champ '{self.field}' est introuvable. "
+                    f"Champs disponibles: {list(row.keys())}"
+                )
+            rows.append({"index": i, self.field: row[self.field]})
+
+        self.data = pd.DataFrame(rows)
 
         print(f"[Dataset] Download completed. Loaded {len(self.data)} rows.")

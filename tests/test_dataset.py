@@ -5,7 +5,7 @@ import pytest
 # On importe la classe à tester
 # Adapte l'import selon ton arborescence :
 # from ton_module.dataset import Dataset
-from dataset import Dataset
+from cleanote.dataset import Dataset
 
 
 def make_stream_iter(rows):

@@ -4,7 +4,7 @@ import pandas as pd
 # Adapte ces imports selon ton arborescence de projet :
 # from ton_module.pipeline import Pipeline
 # Ici on suppose pipeline.py à la racine:
-from pipeline import Pipeline
+from cleanote.pipeline import Pipeline
 
 
 class FakeDataset:

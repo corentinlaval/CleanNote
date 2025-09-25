@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 # Adapte l'import si ton fichier s'appelle autrement:
-from model import Model
+from cleanote.model import Model
 
 
 # ---------- Doubles de test (mocks légers) ----------

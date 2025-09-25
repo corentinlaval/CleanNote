@@ -144,6 +144,7 @@ class Model:
         Synchronous single-doc call. Expects `doc` with a `text` attribute.
         Returns a new Doc with updated text, preserving id and adding model metadata if desired.
         """
+        print(f"[Model] Transforming document {getattr(doc, 'id', '<no-id>')}...")
         if self._pipe is None:
             raise RuntimeError(
                 "Model is not initialized. Call initialize() before transform()."
@@ -154,8 +155,11 @@ class Model:
             raise TypeError("doc.text must be a string.")
 
         prompt = self._format_prompt(input_text)
+        print(f"[Model] Prompt: {prompt[:50]}...")
         outputs = self._pipe(prompt, **self._gen.to_kwargs())
+        print(f"[Model] Raw output: {outputs}")
         out_text = self._extract_text(outputs)
+        print(f"[Model] Extracted text: {out_text[:50]}...")
 
         # Rebuild a Doc of the same type as input
         DocType = type(doc)

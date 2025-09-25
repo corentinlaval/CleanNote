@@ -26,6 +26,7 @@ class Homogeniser:
         for d in in_docs:
             # Construire un prompt très simple
             prompt = f"Count the number of words in the following text:\n\n{d.text}"
+            print(f"[Homogeniser] Prompt for doc {d.id}: {prompt[:50]}...")
             # Transformer le Doc en un nouveau Doc via le modèle
             transformed = model_loader.transform(
                 Doc(id=d.id, text=prompt, meta=d.meta), ctx

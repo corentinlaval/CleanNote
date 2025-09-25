@@ -11,8 +11,8 @@ class FakeTokenizer:
     def __init__(self, pad_token_id=None, eos_token_id=1, **kwargs):
         self.pad_token_id = pad_token_id
         self.eos_token_id = eos_token_id
+        self.eos_token = "<eos>"
         self.pad_token = None
-        # expose kwargs utiles à l'assert si besoin
         self.kwargs = kwargs
 
 

@@ -1,228 +1,152 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Dict, Any
-from dataclasses import dataclass
-from .types import Context
+from typing import Any, Dict, Optional, List
+import copy
 
-try:
-    from transformers import pipeline  # type: ignore
-except Exception as e:
-    raise RuntimeError(
-        "The 'transformers' package is required to use Model. "
-        "Install it with: pip install transformers accelerate torch"
-    ) from e
-
-
-@dataclass
-class GenerationConfig:
-    """Default generation parameters (override per your use-case)."""
-
-    max_new_tokens: int = 128
-    temperature: float = 0.7
-    top_p: float = 0.9
-    top_k: Optional[int] = None
-    num_beams: Optional[int] = None
-    do_sample: bool = True
-    # Add more fields if you need them (repetition_penalty, length_penalty, etc.)
-
-    def to_kwargs(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
-            "max_new_tokens": self.max_new_tokens,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "do_sample": self.do_sample,
-        }
-        if self.top_k is not None:
-            out["top_k"] = self.top_k
-        if self.num_beams is not None:
-            out["num_beams"] = self.num_beams
-            # If beams > 1, many prefer deterministic decoding:
-            if "do_sample" in out and out["do_sample"] and self.num_beams > 1:
-                # Keep as-is; you can set do_sample=False if you want beam search only.
-                pass
-        return out
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 
 class Model:
     """
-    Generic HF model wrapper that can be instantiated with only a Hugging Face repo id.
-    Provides initialize(), transform(), and transform_many() for integration with Homogeniser.
-
-    Logs are concise and professional, in English.
+    Model générique basé sur Hugging Face:
+      - name : repo_id du modèle (ex: 'gpt2', 'meta-llama/Llama-3-8B-Instruct', etc.)
+      - task : tâche du pipeline (ex: 'text-generation', 'fill-mask', 'text2text-generation'…)
+      - params : kwargs passés au pipeline et/ou à la génération (max_new_tokens, temperature, etc.)
     """
 
-    def __init__(
-        self,
-        model_name: str,
-        *,
-        task: str = "text-generation",
-        revision: Optional[str] = None,
-        trust_remote_code: bool = False,
-        device_map: Optional[str] = "auto",  # uses Accelerate if available
-        torch_dtype: Optional[
-            str
-        ] = None,  # e.g., "auto" or "bfloat16" (string to avoid torch import here)
-        prompt_template: str = "{text}",  # simple passthrough by default
-        generation: Optional[GenerationConfig] = None,
-        batch_size: int = 8,
-    ) -> None:
-        self.name = model_name
+    def __init__(self, name: str, task: str = "text-generation", **params: Any):
+        self.name = name
         self.task = task
-        self.revision = revision
-        self.trust_remote_code = trust_remote_code
-        self.device_map = device_map
-        self.torch_dtype = torch_dtype
-        self.prompt_template = prompt_template
-        self.batch_size = batch_size
+        self.params: Dict[str, Any] = params or {}
 
+        self._tokenizer = None
+        self._model = None
         self._pipe = None
-        self._gen = generation or GenerationConfig()
 
-    # ---- Lifecycle -----------------------------------------------------------
+    def load(self) -> None:
+        """Télécharge le modèle & le tokenizer depuis Hugging Face et prépare le pipeline."""
+        if self._pipe is not None:
+            return  # déjà chargé
 
-    def initialize(self, ctx: Optional["Context"] = None) -> None:
-        """Load the HF pipeline."""
-        print(
-            f"[Model] Initializing HF pipeline (model='{self.name}', task='{self.task}', revision={self.revision})..."
-        )
-        pipe_kwargs: Dict[str, Any] = {
-            "task": self.task,
-            "model": self.name,
-            "trust_remote_code": self.trust_remote_code,
-        }
-        # Optional params only if provided
-        if self.revision is not None:
-            pipe_kwargs["revision"] = self.revision
-        if self.device_map is not None:
-            pipe_kwargs["device_map"] = self.device_map
-        if self.torch_dtype is not None:
-            pipe_kwargs["torch_dtype"] = (
-                self.torch_dtype
-            )  # string accepted by HF; or pass actual dtype if you prefer
+        print(f"[Model] Loading model '{self.name}' for task '{self.task}'...")
+        # Vous pouvez ajuster device_map="auto" si vous avez accelerate+GPU
+        self._tokenizer = AutoTokenizer.from_pretrained(self.name)
+        self._model = AutoModelForCausalLM.from_pretrained(self.name)
+        self._pipe = pipeline(self.task, model=self._model, tokenizer=self._tokenizer)
 
-        # Tokenizer will default to the same repo unless remote code needs something special.
-        self._pipe = pipeline(**pipe_kwargs)
-        print("[Model] Initialization completed.")
+        print("[Model] Load completed.")
 
-    # ---- Helpers -------------------------------------------------------------
+    def _apply_to_texts(self, texts: List[str], prompt: str) -> List[str]:
+        """
+        Applique le modèle à une liste de textes.
+        Pour 'text-generation', on concatène prompt + texte et on récupère la génération.
+        """
+        if self._pipe is None:
+            self.load()
 
-    def _format_prompt(self, text: str) -> str:
+        outputs: List[str] = []
+        # Paramètres de génération/pipeline (ex: max_new_tokens=64)
+        infer_kwargs = dict(self.params)
+
+        # Pour 'text-generation', on va concaténer prompt et texte.
+        for txt in texts:
+            if self.task == "text-generation":
+                inp = f"{prompt}\n\n{txt}"
+                result = self._pipe(inp, **infer_kwargs)
+                # result est une liste de dicts avec 'generated_text'
+                gen = result[0].get("generated_text", "")
+                # Si le pipeline renvoie tout le texte, on isole la partie génération
+                # en supprimant l'entrée initiale (simple heuristique)
+                if gen.startswith(inp):
+                    gen = gen[len(inp) :].lstrip("\n")
+                outputs.append(gen)
+            else:
+                # Cas générique : on passe le prompt + texte dans un seul input string
+                inp = f"{prompt}\n\n{txt}".strip()
+                result = self._pipe(inp, **infer_kwargs)
+                # Normaliser différents formats de sorties
+                if isinstance(result, list):
+                    # Prendre le champ text s'il existe, sinon str(result[0])
+                    val = (
+                        result[0].get("generated_text")
+                        or result[0].get("summary_text")
+                        or result[0].get("answer")
+                        or result[0].get("sequence")
+                        or str(result[0])
+                    )
+                else:
+                    val = str(result)
+                outputs.append(val)
+
+        return outputs
+
+    def run(self, dataset, prompt: str):
+        """
+        Applique le modèle au dataset et renvoie un NOUVEAU dataset du même type
+        (dict ou DataFrame), sans re-télécharger depuis Hugging Face.
+        - Si dataset.data est un dict {index: texte}, on renvoie un dict {index: sortie}.
+        - Si c'est un DataFrame avec colonnes ['index', dataset.field], on remplace la colonne `field` par la sortie.
+        """
+        if not hasattr(dataset, "data"):
+            raise ValueError("Le dataset fourni n'a pas d'attribut 'data'.")
+
+        # Copier l'objet sans appeler __init__ (évite un re-download)
+        result_ds = copy.copy(dataset)
+
+        # dict {index: texte}
+        if isinstance(dataset.data, dict):
+            # Assurer un ordre stable par index
+            items = sorted(dataset.data.items(), key=lambda kv: kv[0])
+            indices = [i for i, _ in items]
+            texts = [str(t) for _, t in items]
+
+            outs = self._apply_to_texts(texts, prompt)
+            result_ds.data = {i: o for i, o in zip(indices, outs)}
+            # mettre à jour limit si présent
+            if hasattr(result_ds, "limit"):
+                result_ds.limit = len(result_ds.data)
+            # optionnel: annoter le nom
+            if hasattr(result_ds, "name"):
+                result_ds.name = f"{getattr(dataset, 'name', 'dataset')}__{self.name}"
+
+            return result_ds
+
+        # DataFrame (pandas)
         try:
-            return self.prompt_template.format(text=text)
+            import pandas as pd  # noqa
+
+            is_df = hasattr(dataset.data, "iloc") and hasattr(dataset.data, "columns")
         except Exception:
-            # Fallback: avoid crashing on malformed templates
-            return text
+            is_df = False
 
-    def _extract_text(self, raw_output: Any) -> str:
-        """
-        Normalize HF pipeline outputs to plain text.
-        Handles common keys across tasks.
-        """
-        # Most pipelines return a list of dicts
-        if isinstance(raw_output, list) and raw_output:
-            item = raw_output[0]
-            if isinstance(item, dict):
-                # Common keys by task
-                for key in (
-                    "generated_text",
-                    "summary_text",
-                    "translation_text",
-                    "answer",
-                    "text",
-                ):
-                    if key in item and isinstance(item[key], str):
-                        return item[key]
-        # Fallback: string or repr
-        if isinstance(raw_output, str):
-            return raw_output
-        return str(raw_output)
+        if is_df:
+            if not hasattr(dataset, "field"):
+                raise ValueError(
+                    "Le dataset de type DataFrame doit définir l'attribut 'field'."
+                )
 
-    # ---- Inference API -------------------------------------------------------
+            df = dataset.data.copy()
+            if dataset.field not in df.columns:
+                raise KeyError(
+                    f"Colonne '{dataset.field}' introuvable dans le DataFrame. "
+                    f"Colonnes dispo: {list(df.columns)}"
+                )
 
-    def transform(self, doc, ctx) -> Any:
-        """
-        Synchronous single-doc call. Expects `doc` with a `text` attribute.
-        Returns a new Doc with updated text, preserving id and adding model metadata if desired.
-        """
-        print(f"[Model] Transforming document {getattr(doc, 'id', '<no-id>')}...")
-        if self._pipe is None:
-            raise RuntimeError(
-                "Model is not initialized. Call initialize() before transform()."
-            )
+            texts = df[dataset.field].astype(str).tolist()
+            outs = self._apply_to_texts(texts, prompt)
 
-        input_text = getattr(doc, "text", None)
-        if not isinstance(input_text, str):
-            raise TypeError("doc.text must be a string.")
+            # Remplace la colonne par la sortie du modèle
+            df[dataset.field] = outs
+            result_ds.data = df
+            if hasattr(result_ds, "limit"):
+                result_ds.limit = len(df)
+            if hasattr(result_ds, "name"):
+                result_ds.name = f"{getattr(dataset, 'name', 'dataset')}__{self.name}"
 
-        prompt = self._format_prompt(input_text)
-        print(f"[Model] Prompt: {prompt}...")
-        outputs = self._pipe(prompt, **self._gen.to_kwargs())
-        print(f"[Model] Raw output: {outputs}")
-        out_text = self._extract_text(outputs)
-        print(f"[Model] Extracted text: {out_text}...")
+            return result_ds
 
-        # Rebuild a Doc of the same type as input
-        DocType = type(doc)
-        meta = getattr(doc, "meta", {}) or {}
-        meta_update = dict(meta)
-        meta_update["model"] = {
-            "name": self.name,
-            "task": self.task,
-            "revision": self.revision,
-        }
-        # Create new Doc (assumes signature: Doc(id=..., text=..., meta=...))
-        try:
-            return DocType(id=doc.id, text=out_text, meta=meta_update)
-        except TypeError:
-            # If your Doc uses `content` instead of `text`, fallback:
-            return DocType(id=doc.id, content=out_text, meta=meta_update)
-
-    def transform_many(self, docs: Iterable[Any], ctx) -> List[Any]:
-        """
-        Batched call. Accepts any iterable of Doc-like objects with a `text` attribute.
-        Uses the HF pipeline with batched inputs for efficiency.
-        """
-        if self._pipe is None:
-            raise RuntimeError(
-                "Model is not initialized. Call initialize() before transform_many()."
-            )
-
-        docs_list = list(docs)
-        if not docs_list:
-            return []
-
-        prompts = [self._format_prompt(getattr(d, "text", "")) for d in docs_list]
-        # Batched inference; transformers pipelines accept a list of inputs
-        outputs = self._pipe(prompts, **self._gen.to_kwargs())
-
-        # Normalize outputs to a list (HF pipelines may return list-of-lists depending on params)
-        if outputs and isinstance(outputs, list) and not isinstance(outputs[0], dict):
-            # e.g., [[{generated_text: ...}], [{...}], ...]
-            flat = []
-            for item in outputs:
-                flat.append(self._extract_text(item))
-            texts = flat
-        else:
-            texts = [self._extract_text(o) for o in outputs]
-
-        if len(texts) != len(docs_list):
-            # Conservative safeguard to avoid silent misalignment
-            raise RuntimeError(
-                f"Model produced {len(texts)} outputs for {len(docs_list)} inputs."
-            )
-
-        out_docs: List[Any] = []
-        for src, out_text in zip(docs_list, texts):
-            DocType = type(src)
-            meta = getattr(src, "meta", {}) or {}
-            meta_update = dict(meta)
-            meta_update["model"] = {
-                "name": self.name,
-                "task": self.task,
-                "revision": self.revision,
-            }
-            try:
-                out_docs.append(DocType(id=src.id, text=out_text, meta=meta_update))
-            except TypeError:
-                out_docs.append(DocType(id=src.id, content=out_text, meta=meta_update))
-        return out_docs
+        # Sinon, type non géré
+        raise TypeError(
+            "Type de dataset.data non pris en charge. Utilise un dict {index: texte} "
+            "ou un pandas.DataFrame avec la colonne 'field'."
+        )

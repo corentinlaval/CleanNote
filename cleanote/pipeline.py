@@ -1,52 +1,19 @@
-# cleanote/pipeline.py
-from typing import List, Optional, Tuple
-from .types import Doc, Context, Report
-from .data_downloader import DataDownloader
-from .model import Model
-from .homogeniser import Homogeniser
-from .verifier import Verifier
-
-
 class Pipeline:
-    def __init__(
-        self,
-        downloader: DataDownloader,
-        homogeniser: Homogeniser,
-        verifier: Verifier,
-        homogeniser_model: Optional[Model] = None,
-        verifier_model: Optional[Model] = None,
-    ) -> None:
-        self.downloader = downloader
-        self.homogeniser = homogeniser
-        self.verifier = verifier
-        self.homogeniser_model = homogeniser_model
-        self.verifier_model = verifier_model
+    def __init__(self, dataset, model_h, model_v):
+        self.dataset = dataset
+        self.model_h = model_h
+        self.model_v = model_v
 
-    def run(self, ctx: Context) -> Tuple[List[Doc], List[Report]]:
-        print("[Pipeline] Starting pipeline execution...")
+    def apply(self):
+        print("[Pipeline] Starting pipeline...")
 
-        if self.homogeniser_model:
-            print("[Pipeline] Preloading homogeniser model...")
-            self.homogeniser_model.initialize(ctx)
-            print("[Pipeline] Homogeniser model loaded into context.")
+        prompt_h = "please count the number of words in the following text:"
+        dataset_h = self.model_h.run(self.dataset, prompt_h)
+        print("[Pipeline] Homogenization completed.")
 
-        if self.verifier_model:
-            print("[Pipeline] Preloading verifier model...")
-            self.verifier_model.initialize(ctx)
-            print("[Pipeline] Verifier model loaded into context.")
+        prompt_v = "please verify the following text is not empty:"
+        dataset_v = self.model_v.run(dataset_h, prompt_v)
+        print("[Pipeline] Verification completed.")
 
-        docs_out: List[Doc] = []
-        reports: List[Report] = []
-
-        print("[Pipeline] Fetching documents from DataDownloader...")
-        for doc in self.downloader.fetch(ctx):
-            print(f"[Pipeline] Processing document {doc.id}")
-
-            d = self.homogeniser.run(self.homogeniser_model, doc, ctx)
-            print(f"[Pipeline] Homogenisation done for {doc.id}")
-
-            d = self.verifier.run(self.verifier_model, d, ctx)
-            docs_out.append(d)
-
-        print(f"[Pipeline] Finished. {len(docs_out)} documents processed.")
-        return docs_out, reports
+        print("[Pipeline] Pipeline completed.")
+        return dataset_v

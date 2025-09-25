@@ -4,36 +4,40 @@ from .model import Model
 
 
 class Homogeniser:
+    def __init__(
+        self,
+        prompt_template: str = "Count the number of words in the following text:\n\n{text}",
+    ) -> None:
+        # You can change the prompt without touching the code
+        self.prompt_template = prompt_template
+
     def run(
         self,
         model_loader: Model,
         docs: Union[Doc, Iterable[Doc]],
         ctx: Context,
     ) -> Union[Doc, Iterable[Doc]]:
-        print(f"[Homogeniser] Initializing model loader '{model_loader.name}'...")
-        model_loader.initialize()
-        print("[Homogeniser] Initialization completed.\n")
+        if model_loader is None:
+            raise ValueError("Homogeniser requires a model_loader instance.")
+        # IMPORTANT: do NOT initialize here; the Pipeline already does it.
 
-        # 2) Normalize input to a list for consistent handling
+        # 1) Normalize input
         is_single = isinstance(docs, Doc)
         in_docs = [docs] if is_single else list(docs)
         print(
             f"[Homogeniser] Sending {len(in_docs)} document(s) to the model loader..."
         )
 
-        # 3) Send documents to the model loader with a prompt
-        out_docs = []
+        # 2) Build prompt and call model
+        out_docs: list[Doc] = []
         for d in in_docs:
-            # Construire un prompt très simple
-            prompt = f"Count the number of words in the following text:\n\n{d.text}"
-            print(f"[Homogeniser] Prompt for doc {d.id}: {prompt[:50]}...")
-            # Transformer le Doc en un nouveau Doc via le modèle
-            transformed = model_loader.transform(
-                Doc(id=d.id, text=prompt, meta=d.meta), ctx
-            )
-            out_docs.append(transformed)
+            prompt = self.prompt_template.format(text=d.text)
+            print(f"[Homogeniser] Prompt for doc {d.id}: {prompt[:80]}...")
+            tmp = Doc(id=d.id, text=prompt, meta=getattr(d, "meta", {}))
+            out = model_loader.transform(tmp, ctx)
+            out_docs.append(out)
 
-        # 4) Return output
+        # 3) Return
         print(f"[Homogeniser] Model loader returned {len(out_docs)} document(s).")
         print("[Homogeniser] Done.")
         return out_docs[0] if is_single else out_docs

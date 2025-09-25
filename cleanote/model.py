@@ -1,3 +1,4 @@
+# cleanote/model.py
 from __future__ import annotations
 
 from typing import Iterable, List, Optional, Dict, Any
@@ -17,13 +18,12 @@ except Exception as e:
 class GenerationConfig:
     """Default generation parameters (override per your use-case)."""
 
-    max_new_tokens: int = 128
-    temperature: float = 0.7
-    top_p: float = 0.9
+    max_new_tokens: int = 32  # plus court par défaut => plus rapide
+    temperature: float = 0.0  # déterministe pour tests
+    top_p: float = 1.0
     top_k: Optional[int] = None
     num_beams: Optional[int] = None
-    do_sample: bool = True
-    # Add more fields if you need them (repetition_penalty, length_penalty, etc.)
+    do_sample: bool = False  # pas d'échantillonnage par défaut
 
     def to_kwargs(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
@@ -36,17 +36,13 @@ class GenerationConfig:
             out["top_k"] = self.top_k
         if self.num_beams is not None:
             out["num_beams"] = self.num_beams
-            # If beams > 1, many prefer deterministic decoding:
-            if "do_sample" in out and out["do_sample"] and self.num_beams > 1:
-                # Keep as-is; you can set do_sample=False if you want beam search only.
-                pass
         return out
 
 
 class Model:
     """
     Generic HF model wrapper that can be instantiated with only a Hugging Face repo id.
-    Provides initialize(), transform(), and transform_many() for integration with Homogeniser.
+    Provides initialize(), transform(), and transform_many().
 
     Logs are concise and professional, in English.
     """
@@ -58,11 +54,9 @@ class Model:
         task: str = "text-generation",
         revision: Optional[str] = None,
         trust_remote_code: bool = False,
-        device_map: Optional[str] = "auto",  # uses Accelerate if available
-        torch_dtype: Optional[
-            str
-        ] = None,  # e.g., "auto" or "bfloat16" (string to avoid torch import here)
-        prompt_template: str = "{text}",  # simple passthrough by default
+        device_map: Optional[str] = "auto",
+        torch_dtype: Optional[str] = None,
+        prompt_template: str = "{text}",
         generation: Optional[GenerationConfig] = None,
         batch_size: int = 8,
     ) -> None:
@@ -77,11 +71,13 @@ class Model:
 
         self._pipe = None
         self._gen = generation or GenerationConfig()
+        self._tokenizer = None
+        self._model_max_length = 1024  # mis à jour après init
 
     # ---- Lifecycle -----------------------------------------------------------
 
-    def initialize(self, ctx: Optional["Context"] = None) -> None:
-        """Load the HF pipeline."""
+    def initialize(self, ctx: Optional[Context] = None) -> None:
+        """Load the HF pipeline. `ctx` is accepted for compatibility and ignored."""
         print(
             f"[Model] Initializing HF pipeline (model='{self.name}', task='{self.task}', revision={self.revision})..."
         )
@@ -90,19 +86,22 @@ class Model:
             "model": self.name,
             "trust_remote_code": self.trust_remote_code,
         }
-        # Optional params only if provided
         if self.revision is not None:
             pipe_kwargs["revision"] = self.revision
         if self.device_map is not None:
             pipe_kwargs["device_map"] = self.device_map
         if self.torch_dtype is not None:
-            pipe_kwargs["torch_dtype"] = (
-                self.torch_dtype
-            )  # string accepted by HF; or pass actual dtype if you prefer
+            pipe_kwargs["torch_dtype"] = self.torch_dtype
 
-        # Tokenizer will default to the same repo unless remote code needs something special.
         self._pipe = pipeline(**pipe_kwargs)
+        # capture tokenizer et longueur max
+        self._tokenizer = getattr(self._pipe, "tokenizer", None)
+        self._model_max_length = getattr(self._tokenizer, "model_max_length", 1024)
         print("[Model] Initialization completed.")
+
+    # Alias de compatibilité éventuel
+    def preload(self, ctx: Optional[Context] = None) -> None:
+        self.initialize(ctx)
 
     # ---- Helpers -------------------------------------------------------------
 
@@ -110,19 +109,29 @@ class Model:
         try:
             return self.prompt_template.format(text=text)
         except Exception:
-            # Fallback: avoid crashing on malformed templates
             return text
 
+    def _truncate_for_model(self, prompt: str) -> str:
+        """Truncate prompt to respect model context window, reserving space for generation."""
+        if self._tokenizer is None:
+            return prompt
+        reserve = max(4, int(self._gen.max_new_tokens))
+        max_input = max(16, int(self._model_max_length) - reserve)
+        enc = self._tokenizer(
+            prompt,
+            truncation=True,
+            max_length=max_input,
+            add_special_tokens=True,
+            return_attention_mask=False,
+            return_token_type_ids=False,
+        )
+        ids = enc["input_ids"]
+        return self._tokenizer.decode(ids, skip_special_tokens=True)
+
     def _extract_text(self, raw_output: Any) -> str:
-        """
-        Normalize HF pipeline outputs to plain text.
-        Handles common keys across tasks.
-        """
-        # Most pipelines return a list of dicts
         if isinstance(raw_output, list) and raw_output:
             item = raw_output[0]
             if isinstance(item, dict):
-                # Common keys by task
                 for key in (
                     "generated_text",
                     "summary_text",
@@ -132,18 +141,23 @@ class Model:
                 ):
                     if key in item and isinstance(item[key], str):
                         return item[key]
-        # Fallback: string or repr
         if isinstance(raw_output, str):
             return raw_output
         return str(raw_output)
 
+    def _call_pipeline(self, inputs) -> Any:
+        gen = self._gen.to_kwargs()
+        # éviter l'écho complet sur text-generation
+        if self.task == "text-generation":
+            gen.setdefault("return_full_text", False)
+        # filet de sécurité
+        gen.setdefault("truncation", True)
+        gen.setdefault("max_length", int(self._model_max_length))
+        return self._pipe(inputs, **gen)
+
     # ---- Inference API -------------------------------------------------------
 
     def transform(self, doc, ctx) -> Any:
-        """
-        Synchronous single-doc call. Expects `doc` with a `text` attribute.
-        Returns a new Doc with updated text, preserving id and adding model metadata if desired.
-        """
         print(f"[Model] Transforming document {getattr(doc, 'id', '<no-id>')}...")
         if self._pipe is None:
             raise RuntimeError(
@@ -155,13 +169,10 @@ class Model:
             raise TypeError("doc.text must be a string.")
 
         prompt = self._format_prompt(input_text)
-        print(f"[Model] Prompt: {prompt[:50]}...")
-        outputs = self._pipe(prompt, **self._gen.to_kwargs())
-        print(f"[Model] Raw output: {outputs}")
+        prompt = self._truncate_for_model(prompt)
+        outputs = self._call_pipeline(prompt)
         out_text = self._extract_text(outputs)
-        print(f"[Model] Extracted text: {out_text[:50]}...")
 
-        # Rebuild a Doc of the same type as input
         DocType = type(doc)
         meta = getattr(doc, "meta", {}) or {}
         meta_update = dict(meta)
@@ -170,18 +181,12 @@ class Model:
             "task": self.task,
             "revision": self.revision,
         }
-        # Create new Doc (assumes signature: Doc(id=..., text=..., meta=...))
         try:
             return DocType(id=doc.id, text=out_text, meta=meta_update)
         except TypeError:
-            # If your Doc uses `content` instead of `text`, fallback:
             return DocType(id=doc.id, content=out_text, meta=meta_update)
 
     def transform_many(self, docs: Iterable[Any], ctx) -> List[Any]:
-        """
-        Batched call. Accepts any iterable of Doc-like objects with a `text` attribute.
-        Uses the HF pipeline with batched inputs for efficiency.
-        """
         if self._pipe is None:
             raise RuntimeError(
                 "Model is not initialized. Call initialize() before transform_many()."
@@ -191,22 +196,20 @@ class Model:
         if not docs_list:
             return []
 
-        prompts = [self._format_prompt(getattr(d, "text", "")) for d in docs_list]
-        # Batched inference; transformers pipelines accept a list of inputs
-        outputs = self._pipe(prompts, **self._gen.to_kwargs())
+        prompts = []
+        for d in docs_list:
+            base = getattr(d, "text", "")
+            p = self._format_prompt(base)
+            p = self._truncate_for_model(p)
+            prompts.append(p)
 
-        # Normalize outputs to a list (HF pipelines may return list-of-lists depending on params)
+        outputs = self._call_pipeline(prompts)
         if outputs and isinstance(outputs, list) and not isinstance(outputs[0], dict):
-            # e.g., [[{generated_text: ...}], [{...}], ...]
-            flat = []
-            for item in outputs:
-                flat.append(self._extract_text(item))
-            texts = flat
+            texts = [self._extract_text(item) for item in outputs]
         else:
             texts = [self._extract_text(o) for o in outputs]
 
         if len(texts) != len(docs_list):
-            # Conservative safeguard to avoid silent misalignment
             raise RuntimeError(
                 f"Model produced {len(texts)} outputs for {len(docs_list)} inputs."
             )

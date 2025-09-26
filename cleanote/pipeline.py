@@ -1,112 +1,277 @@
 import re
 import json
 import gc
+from typing import Any, Dict, List, Optional, Tuple
+
 import torch
+import pandas as pd
 
 
+# ---------- Utils robustes de parsing JSON d'entités ----------
+FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
+OBJ_NON_GREEDY_RE = re.compile(r"\{.*?\}", re.DOTALL)
+EXPECTED_KEYS = ("Symptoms", "Diagnoses", "Treatments")
+
+
+def _is_valid_schema(obj: Dict[str, Any]) -> bool:
+    return (
+        isinstance(obj, dict)
+        and all(k in obj for k in EXPECTED_KEYS)
+        and all(isinstance(obj[k], list) for k in EXPECTED_KEYS)
+    )
+
+
+def parse_json_entities(text: str) -> Optional[Dict[str, List[str]]]:
+    """Tente plusieurs stratégies pour extraire un JSON valide {Symptoms[], Diagnoses[], Treatments[]}."""
+    if not text:
+        return None
+
+    # 1) Essai direct
+    try:
+        obj = json.loads(text)
+        if _is_valid_schema(obj):
+            return obj
+    except Exception:
+        pass
+
+    # 2) Bloc fenced ```json ... ```
+    m = FENCE_RE.search(text)
+    if m:
+        candidate = m.group(1).strip()
+        try:
+            obj = json.loads(candidate)
+            if _is_valid_schema(obj):
+                return obj
+        except Exception:
+            pass
+
+    # 3) Tous les objets {...} non-gourmands
+    for m in OBJ_NON_GREEDY_RE.finditer(text):
+        candidate = m.group(0)
+        try:
+            obj = json.loads(candidate)
+            if _is_valid_schema(obj):
+                return obj
+        except Exception:
+            continue
+
+    return None
+
+
+# ---------- Pipeline ----------
 class Pipeline:
-    def __init__(self, dataset, model_h, model_v):
+    """
+    Hypothèses légères :
+      - self.dataset.data est un pandas.DataFrame
+      - self.dataset.field est le nom de la colonne texte à traiter
+      - model_h.run(dataset, prompt, output_col=...) renvoie un objet avec attribut .data (DataFrame) contenant la colonne de sortie
+    """
+
+    def __init__(self, dataset, model_h, model_v=None, verbose: bool = True):
         self.dataset = dataset
         self.model_h = model_h
         self.model_v = model_v
-        self.dataset_h = None
-        self.dataset_v = None
+        self.verbose = verbose
 
-    def apply(self):
-        print("[Pipeline] Starting pipeline...")
+        # seront remplis au fil des étapes
+        self.dataset_h = None  # dataset après substep1
+        self._col_text = getattr(self.dataset, "field", "text")  # garde
+        self._col_entities_raw = f"{self._col_text}__h_raw"
+        self._col_summary = f"{self._col_text}__summary"
 
-        out_h = self.homogenize()
+    # ----------------- API publique -----------------
+    def apply(self) -> pd.DataFrame:
+        """Exécute la pipeline et retourne un DataFrame final avec textes, entités (listes) et résumé."""
+        if self.verbose:
+            print("[Pipeline] Starting pipeline...")
 
-        # prompt_v = "please verify the following text is not empty:"
-        # out_v_col = f"{self.dataset.field}__v"
-        # dataset_v = self.model_v.run(dataset_h, prompt_v, output_col=out_v_col)
-        # print("[Pipeline] Verification completed.")
-        # return dataset_v
+        df_final = self.homogenize()
 
-        print("[Pipeline] Pipeline completed.")
-        return out_h
+        if self.verbose:
+            print("[Pipeline] Pipeline completed.")
+        return df_final
 
-    def homogenize(self) -> str:
-        print("[Pipeline - Homogenize] Start Homogenization SS1...")
-        out_h_ss1 = self.substep1()
-        print("[Pipeline - Homogenize] Homogenization SS1 Done.")
+    # ----------------- Étape 1 : extraction entités + Étape 2 : résumé -----------------
+    def homogenize(self) -> pd.DataFrame:
+        if self.verbose:
+            print("[Pipeline - Homogenize] Start SS1 (entities extraction)...")
+        df_with_entities = self.substep1()
+        if self.verbose:
+            print("[Pipeline - Homogenize] SS1 done.")
 
-        print("[Pipeline - Homogenize] Start Homogenization SS2...")
-        out_h_ss2 = self.substep2(out_h_ss1)
-        print("[Pipeline - Homogenize] Homogenization SS2 Done.")
-        return out_h_ss2
+        if self.verbose:
+            print("[Pipeline - Homogenize] Start SS2 (summarization)...")
+        df_final = self.substep2(df_with_entities)
+        if self.verbose:
+            print("[Pipeline - Homogenize] SS2 done.")
+        return df_final
 
-    def substep1(self) -> dict:
+    # ----------------- Substep 1 : extraction entités pour TOUTES les lignes -----------------
+    def substep1(self) -> pd.DataFrame:
         prompt_h_ss1 = self.build_substep1_prompt()
-        max_retries = 3
 
-        for attempt in range(1, max_retries + 1):
+        # Gardes dataset
+        if not hasattr(self.dataset, "data"):
+            raise ValueError("dataset.data manquant")
+        if self.dataset.data.empty:
+            # Colonnes vides prêtes pour la suite
+            base = self.dataset.data.copy()
+            base["Symptoms"] = [[] for _ in range(len(base))]
+            base["Diagnoses"] = [[] for _ in range(len(base))]
+            base["Treatments"] = [[] for _ in range(len(base))]
+            return base
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                gc.collect()
+        # Nettoyage mémoire (ordre recommandé : gc puis CUDA)
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
-            print(f"[Pipeline - SubStep1] Start Homogenization {attempt}...")
+        if self.verbose:
+            print("[Pipeline - SubStep1] Running model for entity extraction...")
+        # Exécution modèle : on suppose que .run gère l'itération sur toutes les lignes
+        self.dataset_h = self.model_h.run(
+            self.dataset, prompt_h_ss1, output_col=self._col_entities_raw
+        )
 
-            out_h_col = f"{self.dataset.field}__h"
-
-            self.dataset_h = self.model_h.run(
-                self.dataset, prompt_h_ss1, output_col=out_h_col
+        # Sécurité minimale
+        if not hasattr(self.dataset_h, "data"):
+            raise RuntimeError(
+                "model_h.run(...) n'a pas renvoyé un objet avec .data (DataFrame)."
+            )
+        df = self.dataset_h.data
+        if self._col_entities_raw not in df.columns:
+            raise RuntimeError(
+                f"Colonne de sortie {self._col_entities_raw} absente du DataFrame renvoyé."
             )
 
-            out_h_ss1 = self.dataset_h.data.loc[0, out_h_col]
+        # Parse pour chaque ligne
+        symptoms_list: List[List[str]] = []
+        diagnoses_list: List[List[str]] = []
+        treatments_list: List[List[str]] = []
 
-            match = re.search(r"\{.*\}", out_h_ss1, re.DOTALL)
-            if match:
-                try:
-                    parsed = json.loads(match.group(0))
-                    if (
-                        isinstance(parsed.get("Symptoms"), list)
-                        and isinstance(parsed.get("Diagnoses"), list)
-                        and isinstance(parsed.get("Treatments"), list)
-                    ):
-                        return parsed
-                except json.JSONDecodeError:
-                    pass
-            print(f"Retry {attempt}/{max_retries} for JSON extraction...")
+        for raw in df[self._col_entities_raw].astype(str).tolist():
+            parsed = parse_json_entities(raw)
+            if parsed is None:
+                parsed = {"Symptoms": [], "Diagnoses": [], "Treatments": []}
+            # cast propre en listes de str
+            symptoms_list.append([str(x) for x in parsed.get("Symptoms", [])])
+            diagnoses_list.append([str(x) for x in parsed.get("Diagnoses", [])])
+            treatments_list.append([str(x) for x in parsed.get("Treatments", [])])
 
-            print(f"[Pipeline - SubStep1] Homogenization {attempt} completed.")
-        return {"Symptoms": [], "Diagnoses": [], "Treatments": []}
+        # Ajoute colonnes entités
+        df_entities = df.copy()
+        df_entities["Symptoms"] = symptoms_list
+        df_entities["Diagnoses"] = diagnoses_list
+        df_entities["Treatments"] = treatments_list
 
-    def substep2(self, entities: dict) -> str:
-        prompt_h_ss2 = self.build_substep2_prompt(entities)
-        out_h_ss2_col = f"{self.dataset.field}__v"
-        self.dataset_h = self.model_h.run(
-            self.dataset_h, prompt_h_ss2, output_col=out_h_ss2_col
+        return df_entities
+
+    # ----------------- Substep 2 : résumé pour TOUTES les lignes -----------------
+    def substep2(self, df_entities: pd.DataFrame) -> pd.DataFrame:
+        """
+        Pour injecter les entités spécifiques à chaque ligne dans le prompt,
+        on compose une nouvelle colonne texte : ENTITIES + NOTE.
+        Puis on met temporairement dataset_h.field sur cette colonne.
+        """
+        # Compose une vue ligne-à-ligne "entities + note"
+        ent_json_series = df_entities.apply(
+            lambda r: json.dumps(
+                {
+                    "Symptoms": r.get("Symptoms", []),
+                    "Diagnoses": r.get("Diagnoses", []),
+                    "Treatments": r.get("Treatments", []),
+                },
+                ensure_ascii=False,
+            ),
+            axis=1,
         )
-        out_h_ss2 = self.dataset_h.data.loc[0, out_h_ss2_col]
-        return out_h_ss2
 
+        composed_col = f"{self._col_text}__summary_input"
+        df_entities = df_entities.copy()
+        df_entities[composed_col] = (
+            ent_json_series.radd("Extracted Entities (JSON):\n").radd("")
+            + "\n\nClinical Note:\n"
+            + df_entities[self._col_text].astype(str)
+        )
+
+        # On fabrique un petit "dataset" compatible avec model_h.run
+        # Hypothèse : le type de self.dataset est un simple wrapper (data, field)
+        # On en crée une copie modifiée.
+        dataset_for_summary = (
+            type(self.dataset)(
+                dataset=(
+                    df_entities
+                    if "dataset" in type(self.dataset).__init__.__code__.co_varnames
+                    else None
+                ),  # si constructeur custom
+                model_h=None,
+                model_v=None,
+            )
+            if False
+            else self.dataset
+        )  # fallback : on réutilise self.dataset
+
+        # Plus simple/robuste : on met à jour directement les attributs attendus.
+        # (On évite d'appeler le constructeur si on ne le connaît pas.)
+        dataset_for_summary = self.dataset_h  # réutilise l'objet renvoyé par substep1
+        dataset_for_summary.data = df_entities
+        dataset_for_summary.field = (
+            composed_col  # le modèle lira ce champ comme 'entrée texte'
+        )
+
+        prompt_h_ss2 = (
+            self.build_substep2_prompt()
+        )  # prompt générique, ENTITIES déjà dans l'entrée
+
+        # Mémoire
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        if self.verbose:
+            print("[Pipeline - SubStep2] Running model for summarization...")
+        dataset_after_summary = self.model_h.run(
+            dataset_for_summary, prompt_h_ss2, output_col=self._col_summary
+        )
+
+        df_out = dataset_after_summary.data
+        if self._col_summary not in df_out.columns:
+            raise RuntimeError(
+                f"Colonne de sortie {self._col_summary} absente après summarization."
+            )
+
+        # DataFrame final minimal et lisible
+        final_df = pd.DataFrame(
+            {
+                "text": df_out[self._col_text].astype(str),
+                "Symptoms": df_out["Symptoms"],
+                "Diagnoses": df_out["Diagnoses"],
+                "Treatments": df_out["Treatments"],
+                "Summary": df_out[self._col_summary].astype(str),
+            }
+        )
+
+        return final_df
+
+    # ----------------- Prompts -----------------
     def build_substep1_prompt(self) -> str:
+        # La NOTE est lue via dataset.field par le modèle.
         return (
             "System: You are OpenBioLLM, a clinical text analysis assistant.\n"
-            "Output ONLY a JSON object with exactly these keys:\n"
-            '- "Symptoms": list of strings (empty if none)\n'
-            '- "Diagnoses": list of strings (empty if none)\n'
-            '- "Treatments": list of strings (empty if none)\n'
-            "Do not add any other keys or text.\n\n"
-            "User: Extract the clinical entities from the note below:\n"
+            "Return ONLY a JSON object (no prose) with EXACTLY these keys:\n"
+            '  "Symptoms": list of strings\n'
+            '  "Diagnoses": list of strings\n'
+            '  "Treatments": list of strings\n'
+            "If none, use empty lists. Do not include explanations.\n"
+            "Wrap the JSON in a ```json fenced code block.\n\n"
+            "User: Extract the clinical entities from the clinical note below."
         )
 
-    def build_substep2_prompt(self, entities: dict) -> str:
-        ent_json = json.dumps(
-            {
-                "Symptoms": entities["Symptoms"],
-                "Diagnoses": entities["Diagnoses"],
-                "Treatments": entities["Treatments"],
-            },
-            ensure_ascii=False,
-        )
+    def build_substep2_prompt(self) -> str:
+        # Le JSON des entités et la note sont déjà concaténés dans la colonne composed_col.
         return (
             "System: You are OpenBioLLM, a clinical summarization assistant.\n"
-            "You will be given a clinical note and a JSON of extracted entities.\n"
-            "Write a concise summary of the note, weaving in the key symptoms, diagnoses, and treatments.\n"
-            "Output ONLY the summary text, no other JSON or commentary.\n\n"
-            f"Extracted Entities:\n{ent_json}\n\n"
-            "Clinical Note:"
+            "You will receive a JSON of extracted entities followed by the clinical note.\n"
+            "Write a concise, clinically faithful summary weaving key symptoms, diagnoses, and treatments.\n"
+            "Output ONLY the summary text (no JSON, no commentary)."
         )

@@ -10,15 +10,19 @@ from cleanote.pipeline import Pipeline
 # ----------------- Doubles de test -----------------
 class FakeDataset:
     """Dataset minimal compatible (DataFrame-only) pour tester Pipeline."""
+
     def __init__(self, field="full_note"):
         self.field = field
         self.name = "dummy/ds"
         self.limit = 2
-        self.data = pd.DataFrame({"index": [0, 1], field: ["hello world", "second row"]})
+        self.data = pd.DataFrame(
+            {"index": [0, 1], field: ["hello world", "second row"]}
+        )
 
 
 class FakeModel:
     """Mock de Model avec .run(dataset, prompt, output_col)."""
+
     def __init__(self):
         self.calls = []  # trace des appels
 

@@ -10,7 +10,8 @@
 
 
 ---
-## English [![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
+## English 
+[![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
 
 **CleanNote** analyzes raw medical notes and transforms them into concise, structured documents focused on symptoms, medical conclusions, and treatments, enabling easier analysis and clinical research.
 
@@ -26,7 +27,8 @@ This work was supervised by three people:
 
 ---
 
-## Installation [![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
+## Installation 
+[![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
 First, make sure you are inside your Python virtual environment (e.g. `venv`).  
 To install the **latest available version** (see the PyPI badge above):
 
@@ -43,7 +45,8 @@ The latest released version is always displayed in the PyPI badge at the top of 
 
 ---
 
-## Usage [![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
+## Usage 
+[![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
 After installation, you can using **CleanNote** with just few lines of code:
 
 ```bash
@@ -74,7 +77,8 @@ print(f"Excel file saved to : {xls}")
 
 ---
 
-## Français [![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
+## Français 
+[![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
 
 **CleanNote** analyse des notes médicales brutes et les transforme en documents concis et structurés, centrés sur les symptômes, les conclusions médicales et les traitements, afin de faciliter leur analyse et la recherche clinique.
 
@@ -90,7 +94,8 @@ Ce travail a été supervisé par trois personnes :
 
 ---
 
-## Installation [![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
+## Installation 
+[![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
 Tout d’abord, assurez-vous d’être dans votre environnement virtuel Python (par ex. `venv`).  
 Pour installer la **dernière version disponible** (voir le badge PyPI ci-dessus) :
 
@@ -107,7 +112,8 @@ La dernière version publiée est toujours affichée dans le badge PyPI en haut 
 
 ---
 
-## Utilisation [![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
+## Utilisation 
+[![Haut de page](https://img.shields.io/badge/▲-Haut_de_page-green)](#cleannote)
 Après installation, vous pouvez utiliser **CleanNote** en seulement quelques lignes de code :
 
 ```bash

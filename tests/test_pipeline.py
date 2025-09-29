@@ -1,9 +1,7 @@
 # tests/test_pipeline.py
 import pandas as pd
+import re
 
-# Adapte ces imports selon ton arborescence de projet :
-# from ton_module.pipeline import Pipeline
-# Ici on suppose pipeline.py à la racine:
 from cleanote.pipeline import Pipeline
 
 
@@ -40,14 +38,14 @@ class FakeModel:
 def test_pipeline_apply_happy_path(capsys):
     ds = FakeDataset(field="full_note")
     m_h = FakeModel()
-    m_v = FakeModel()  # inutilisé dans la version actuelle du pipeline
 
-    pipe = Pipeline(dataset=ds, model_h=m_h, model_v=m_v)
+    pipe = Pipeline(dataset=ds, model_h=m_h)
     out = pipe.apply()
 
     # Vérifie les prints
     printed = capsys.readouterr().out
     assert "[Pipeline] Starting pipeline..." in printed
+    assert "[Pipeline] Prompt for Homogenization:" in printed
     assert "[Pipeline] Start Homogenization..." in printed
     assert "[Pipeline] Homogenization completed." in printed
     assert "[Pipeline] Pipeline completed." in printed
@@ -55,12 +53,12 @@ def test_pipeline_apply_happy_path(capsys):
     # Vérifie que model_h.run a été appelé avec le bon prompt + output_col
     assert len(m_h.calls) == 1
     call = m_h.calls[0]
-    assert call["prompt"].startswith("please give me the number of words")
+    assert call["prompt"].lstrip().startswith("Analyze the document below")
     assert call["output_col"] == f"{ds.field}__h"
 
-    # Vérifie le DataFrame de sortie: colonne ajoutée, contenu cohérent
-    assert out is not ds  # retourne un *nouveau* dataset
-    assert out.field == ds.field  # le champ est préservé
+    # Vérifie l'objet retourné : nouveau dataset avec la nouvelle colonne
+    assert out is not ds
+    assert out.field == ds.field
     new_col = f"{ds.field}__h"
     assert new_col in out.data.columns
     assert list(out.data[new_col]) == ["OK-0", "OK-1"]
@@ -72,8 +70,31 @@ def test_pipeline_apply_happy_path(capsys):
 def test_pipeline_no_side_effect_on_input():
     ds = FakeDataset()
     m_h = FakeModel()
-    pipe = Pipeline(ds, m_h, FakeModel())
-    _ = pipe.apply()
+    _ = Pipeline(ds, m_h).apply()
 
     # Le dataset d'entrée ne doit pas être modifié
     assert list(ds.data.columns) == ["index", ds.field]
+
+
+def test_build_prompt_contains_required_keys():
+    """Le prompt doit mentionner explicitement les 4 clés JSON attendues."""
+    ds = FakeDataset()
+    m_h = FakeModel()
+    p = Pipeline(ds, m_h)
+    prompt = p.build_prompt_h()
+
+    for key in ["Symptoms", "MedicalConclusion", "Treatments", "Summary"]:
+        assert key in prompt
+
+    # Le prompt doit rappeler 'valid JSON' ou similaire
+    assert re.search(r"\bvalid JSON\b", prompt, re.IGNORECASE) is not None
+
+
+def test_output_col_name_depends_on_field():
+    """Le suffixe __h doit s'appuyer sur dataset.field."""
+    ds = FakeDataset(field="note_text")
+    m_h = FakeModel()
+    _ = Pipeline(ds, m_h).apply()
+
+    assert len(m_h.calls) == 1
+    assert m_h.calls[0]["output_col"] == "note_text__h"

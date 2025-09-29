@@ -70,7 +70,7 @@ class Pipeline:
     def __init__(self, dataset, model_h, model_v=None, verbose: bool = True):
         self.dataset = dataset
         self.model_h = model_h
-        self.model_v = model_v
+        # self.model_v = model_v
         self.verbose = verbose
 
         # seront remplis au fil des étapes
@@ -143,6 +143,15 @@ class Pipeline:
             raise RuntimeError(
                 f"Colonne de sortie {self._col_entities_raw} absente du DataFrame renvoyé."
             )
+
+        # Dump de la 1ère sortie brute pour debug
+        try:
+            print(
+                "[DEBUG] raw_h_output_example:\n",
+                self.dataset_h.data[self._col_entities_raw].iloc[0],
+            )
+        except Exception as e:
+            print("[DEBUG] impossible d'afficher raw output:", e)
 
         # Parse pour chaque ligne
         symptoms_list: List[List[str]] = []

@@ -150,12 +150,8 @@ class Model:
             print("[Model] Defining the prompt...")
             inp = f"{prompt}\n\n{txt}".strip()
 
-            print(f"[Model] Prompt: {inp[:200]}...")
-
             print("[Model] Generating...")
             result = self._pipe(inp, **infer_kwargs)
-
-            print(f"[Model] Result: {str(result)[:200]}...")
 
             print("[Model] Checking result format...")
             if isinstance(result, list) and result:

@@ -441,3 +441,21 @@ def test_generation_overrides_take_precedence(monkeypatch):
     # L'override doit primer
     assert rec.calls[-1]["max_new_tokens"] == 3
     assert rec.calls[-1]["temperature"] == 0.0
+
+
+def test_load_is_idempotent(patch_transformers):
+    m = Model(name="repo/model", task="text-generation")
+    first_pipe = m._pipe
+    # On appelle load() à nouveau -> doit retourner directement, sans recréer un nouveau pipe
+    m.load()
+    assert m._pipe is first_pipe
+
+
+def test_run_raises_if_no_data_attr(patch_transformers):
+    class BadDs:
+        field = "x"  # pas d'attribut .data
+
+    m = Model(name="repo/model", task="text-generation")
+    with pytest.raises(ValueError) as e:
+        m.run(BadDs(), "prompt")
+    assert "No attribute 'data'" in str(e.value)

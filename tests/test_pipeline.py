@@ -2,7 +2,6 @@
 import os
 import re
 import pandas as pd
-import pytest
 
 from cleanote.pipeline import Pipeline
 
@@ -118,26 +117,6 @@ def test_homogenize_returns_none_and_sets_dataset_h():
     assert p.dataset_h is not None
     # colonne créée
     assert f"{ds.field}__h" in p.dataset_h.data.columns
-
-
-def test_to_excel_success(tmp_path):
-    """to_excel crée un fichier et renvoie son chemin (par défaut 'dataset_h.xlsx')."""
-    ds = FakeDataset()
-    m_h = FakeModel()
-    p = Pipeline(ds, m_h)
-    _ = p.apply()
-
-    # Exécute to_excel dans un répertoire temporaire
-    cwd = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        path = p.to_excel()
-        assert path == "dataset_h.xlsx"
-        assert os.path.exists(path)
-        # Le fichier ne doit pas être vide
-        assert os.path.getsize(path) > 0
-    finally:
-        os.chdir(cwd)
 
 
 def test_to_excel_success(tmp_path, monkeypatch):

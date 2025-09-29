@@ -6,7 +6,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
 
 
-**CleanNote** transforms raw notes from the medical domain into standardized, clean, and structured text that can be used for analysis and clinical research.  
+**CleanNote** analyzes raw medical notes and transforms them into concise, structured documents focused on symptoms, medical conclusions, and treatments, enabling easier analysis and clinical research.
+
+This solution was developed during a research internship at the **** laboratory, and is currently demonstrated using the **AGBonnet/Augmented-clinical-notes** dataset together with the **mistralai/Mistral-7B-Instruct-v0.3** model.
+
+This work was supervised by three people:
+
+- **Ms.** ****, company supervisor and associate professor, who proposed the topic of the preprocessing pipeline,
+
+- **Ms.** ****, school supervisor and associate professor, who guided me on frugality aspects and formatting,
+
+- **Mr.** ****, company supervisor and PhD student, who provided support on identifying adapted solutions and domain knowledge.
 
 ---
 

@@ -209,3 +209,93 @@ def test_pipeline_return_full_text_not_overridden(patch_transformers):
     call = m._pipe.calls[-1]
     # On ne veut PAS voir 'return_full_text' dans les kwargs d'inférence
     assert "return_full_text" not in call["infer_kwargs"]
+
+
+def test_run_handles_dict_response(monkeypatch, patch_transformers):
+    """Couvre la branche dict: result = {'generated_text': 'GEN_OUT'}."""
+    from cleanote import model as model_mod
+
+    class DictPipelineRecorder:
+        def __init__(self, task, model, tokenizer, **kwargs):
+            self.calls = []
+
+        def __call__(self, inputs, **infer_kwargs):
+            self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
+            return {"generated_text": "GEN_OUT"}  # <-- dict, pas list
+
+    monkeypatch.setattr(
+        model_mod,
+        "pipeline",
+        lambda task, model, tokenizer, **kw: DictPipelineRecorder(
+            task, model, tokenizer, **kw
+        ),
+    )
+
+    df = pd.DataFrame({"full_note": ["a", "b"]})
+    ds = FakeDataset(df)
+    m = Model(name="repo/model", task="text-generation")
+
+    out_ds = m.run(ds, "p")
+    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
+    assert list(out_ds.data[new_col]) == ["GEN_OUT", "GEN_OUT"]
+
+
+def test_run_handles_non_list_non_dict_response(monkeypatch, patch_transformers):
+    """Couvre la branche fallback: result est une str (ni list, ni dict)."""
+    from cleanote import model as model_mod
+
+    class StrPipelineRecorder:
+        def __init__(self, task, model, tokenizer, **kwargs):
+            self.calls = []
+
+        def __call__(self, inputs, **infer_kwargs):
+            self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
+            return "PLAIN"  # <-- ni list ni dict
+
+    monkeypatch.setattr(
+        model_mod,
+        "pipeline",
+        lambda task, model, tokenizer, **kw: StrPipelineRecorder(
+            task, model, tokenizer, **kw
+        ),
+    )
+
+    df = pd.DataFrame({"full_note": ["a"]})
+    ds = FakeDataset(df)
+    m = Model(name="repo/model", task="text-generation")
+
+    out_ds = m.run(ds, "p")
+    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
+    assert list(out_ds.data[new_col]) == ["PLAIN"]
+
+
+def test_run_generation_overrides(monkeypatch, patch_transformers):
+    """Vérifie que les overrides à l'appel (ex: max_new_tokens) sont bien pris en compte."""
+    from cleanote import model as model_mod
+
+    class RecordingPipeline:
+        def __init__(self, task, model, tokenizer, **kwargs):
+            self.calls = []
+
+        def __call__(self, inputs, **infer_kwargs):
+            self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
+            return [{"generated_text": "OVERRIDE_OK"}]
+
+    rec = RecordingPipeline
+    monkeypatch.setattr(
+        model_mod,
+        "pipeline",
+        lambda task, model, tokenizer, **kw: rec(task, model, tokenizer, **kw),
+    )
+
+    df = pd.DataFrame({"full_note": ["x"]})
+    ds = FakeDataset(df)
+    m = Model(name="repo/model", task="text-generation", max_new_tokens=128)
+
+    out_ds = m.run(ds, "p", max_new_tokens=3)  # <-- override
+    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
+    assert list(out_ds.data[new_col]) == ["OVERRIDE_OK"]
+
+    # On récupère le dernier appel pipeline et on vérifie l'override
+    last_call = m._pipe.calls[-1]
+    assert last_call["infer_kwargs"]["max_new_tokens"] == 3

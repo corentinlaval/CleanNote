@@ -11,6 +11,12 @@
 
 ---
 ## English 
+<p align="right">
+  <a href="#cleanote">
+    <img src="https://img.shields.io/badge/▲-Back_to_top-blue" alt="Back to top"/>
+  </a>
+</p>
+
 [![Back to top](https://img.shields.io/badge/▲-Back_to_top-blue)](#cleannote)
 
 **CleanNote** analyzes raw medical notes and transforms them into concise, structured documents focused on symptoms, medical conclusions, and treatments, enabling easier analysis and clinical research.

@@ -88,6 +88,19 @@ xls = pipe.to_excel()
 print(f"Excel file saved to : {xls}")
 
 ```
+---
+
+## Literature
+<p align="right">
+  <a href="#cleannote">
+    <img src="https://img.shields.io/badge/▲-Back_to_top-blue" alt="Back to top"/>
+  </a>
+</p>
+
+- *Identification de profils patients à partir de notes cliniques non structurées.*  
+  **Corentin Laval, Catherine Combes, Rémi Eyraud, Virginie Fresse**.  
+  *PFIA 2025.*
+
 
 ---
 
@@ -171,18 +184,16 @@ print(f"Fichier Excel sauvegardé : {xls}")
 
 ---
 
+## Références
+<p align="right">
+  <a href="#cleannote">
+    <img src="https://img.shields.io/badge/▲-Haut_de_page-green" alt="Haut de page"/>
+  </a>
+</p>
 
-
-## Quickstart  
-
-Clone the repository:  
-
-```
-git clone https://github.com/corentinlaval/CleanNote.git
-cd CleanNote
-python -m cleanote --config configs/base.yaml
-```
-
+- *Identification de profils patients à partir de notes cliniques non structurées.*  
+  **Corentin Laval, Catherine Combes, Rémi Eyraud, Virginie Fresse**.  
+  *PFIA 2025.*
 
 
 ---

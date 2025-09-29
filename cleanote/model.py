@@ -171,7 +171,7 @@ class Model:
         safe_name = self.name.replace("/", "_").replace("-", "_").replace(".", "_")
         print(f"[Model] Processing {self.name} into {safe_name}...")
 
-        print(f"[Model] Determining output column name...")
+        print("[Model] Determining output column name...")
         if output_col is None:
             output_col = f"{dataset.field}__{safe_name}"
 

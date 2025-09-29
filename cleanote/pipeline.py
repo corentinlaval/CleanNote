@@ -44,3 +44,7 @@ class Pipeline:
 
             Document:
             """
+
+    def to_excel(self) -> str:
+        self.dataset_h.data.to_excel("dataset_h.xlsx", index=False)
+        return "dataset_h.xlsx"

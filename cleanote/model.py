@@ -93,21 +93,27 @@ class Model:
         self._tokenizer = None
         self._model = None
         self._pipe = None
+        self.load()
 
     def load(self) -> None:
         if self._pipe is not None:
             return
         print(f"[Model] Loading model '{self.name}' for task '{self.task}'...")
 
+        print("[Model] Checking tokenizer...")
         if "use_fast" not in self.tokenizer_kwargs:
             self.tokenizer_kwargs["use_fast"] = True
         tok = AutoTokenizer.from_pretrained(self.name, **self.tokenizer_kwargs)
         _ensure_pad_token(tok)
 
+        print("[Model] Settling model kwargs...")
         self.model_kwargs.setdefault("low_cpu_mem_usage", True)
         self.model_kwargs.setdefault("use_safetensors", True)
+
+        print("[Model] Downloading model...")
         mdl = AutoModelForCausalLM.from_pretrained(self.name, **self.model_kwargs)
 
+        print("[Model] Defining pipeline...")
         self._pipe = pipeline(
             "text-generation",
             model=mdl,
@@ -117,40 +123,63 @@ class Model:
         print("[Model] Load completed.")
 
     def run(self, dataset, prompt: str, output_col: str | None = None, **gen_overrides):
-        """Applique le modèle sur dataset[field] et ajoute une colonne avec la sortie."""
-        if self._pipe is None:
-            self.load()
-
         if not hasattr(dataset, "data"):
-            raise ValueError("Le dataset fourni n'a pas d'attribut 'data'.")
-        if not isinstance(dataset.data, pd.DataFrame):
-            raise TypeError("Le dataset.data doit être un pandas.DataFrame.")
-        if not hasattr(dataset, "field"):
-            raise ValueError("Le dataset doit définir l'attribut 'field'.")
-        if dataset.field not in dataset.data.columns:
-            raise KeyError(f"Colonne '{dataset.field}' introuvable.")
+            raise ValueError("[Model] No attribute 'data' found on dataset.")
 
+        if not isinstance(dataset.data, pd.DataFrame):
+            raise TypeError(
+                "[Model] The 'data' attribute of dataset must be a pandas DataFrame."
+            )
+
+        if not hasattr(dataset, "field"):
+            raise ValueError("[Model] The dataset must define the 'field' attribute.")
+
+        if dataset.field not in dataset.data.columns:
+            raise KeyError(f"[Model] Column '{dataset.field}' not found.")
+
+        print("[Model] Copying dataset...")
         df = dataset.data.copy()
+
+        print(f"[Model] Keeping column '{dataset.field}' as text source.")
         texts = df[dataset.field].astype(str).tolist()
 
-        # fusion defaults init + overrides appel
         infer_kwargs = {**self.generation_kwargs, **gen_overrides}
 
         outs = []
         for txt in texts:
+            print("[Model] Defining the prompt...")
             inp = f"{prompt}\n\n{txt}".strip()
+
+            print(f"[Model] Prompt: {inp[:200]}...")
+
+            print("[Model] Generating...")
             result = self._pipe(inp, **infer_kwargs)
-            # robustifier l'extraction du texte généré
+
+            print(f"[Model] Result: {str(result)[:200]}...")
+
+            print("[Model] Checking result format...")
             if isinstance(result, list) and result:
                 outs.append(result[0].get("generated_text", ""))
+                print("[Model] OK result is a non-empty list.")
             elif isinstance(result, dict):
                 outs.append(result.get("generated_text", ""))
+                print("[Model] OK result is a dict.")
             else:
                 outs.append(str(result))
+                print(
+                    "[Model] Warning: result is not a list or dict, storing str(result)."
+                )
+
+        print(f"[Model] Generated {len(outs)} outputs.")
 
         safe_name = self.name.replace("/", "_").replace("-", "_").replace(".", "_")
+        print(f"[Model] Processing {self.name} into {safe_name}...")
+
+        print(f"[Model] Determining output column name...")
         if output_col is None:
             output_col = f"{dataset.field}__{safe_name}"
+
+        print(f"[Model] Initial output column name: {output_col}")
 
         base, i = output_col, 1
         while output_col in df.columns:
@@ -158,6 +187,8 @@ class Model:
             i += 1
 
         df[output_col] = outs
+        print(f"[Model] Final output column name: {output_col}")
+        print(f"[Model] out is: {outs}")
 
         result_ds = copy.copy(dataset)
         result_ds.data = df

@@ -5,6 +5,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
 import copy
 import pandas as pd
+import json
+import re
 
 
 def _ensure_pad_token(tok):
@@ -54,6 +56,20 @@ def _split_kwargs_simple(
     _normalize_dtypes(model_kwargs)
 
     return pipeline_kwargs, generation_kwargs, model_kwargs, tokenizer_kwargs
+
+
+def _extract_json_block(text: str) -> dict:
+    """
+    Extrait le premier bloc JSON trouvé dans `text` et le parse en dict.
+    Retourne {} si rien de valide n'est trouvé.
+    """
+    try:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except json.JSONDecodeError:
+        pass
+    return {}
 
 
 class Model:
@@ -183,6 +199,15 @@ class Model:
         df[output_col] = outs
         print(f"[Model] Final output column name: {output_col}")
         print(f"[Model] out is: {outs}")
+
+        # --- Post-traitement sûr : extraction JSON + colonnes structurées ---
+        parsed_series = df[output_col].apply(_extract_json_block)
+        df["Symptoms"] = parsed_series.apply(lambda d: d.get("Symptoms", []))
+        df["MedicalConclusion"] = parsed_series.apply(
+            lambda d: d.get("MedicalConclusion", [])
+        )
+        df["Treatments"] = parsed_series.apply(lambda d: d.get("Treatments", []))
+        df["Summary"] = parsed_series.apply(lambda d: d.get("Summary", ""))
 
         result_ds = copy.copy(dataset)
         result_ds.data = df

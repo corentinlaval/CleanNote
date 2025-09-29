@@ -1,7 +1,6 @@
 # CleanNote
 
 ![CI](https://github.com/corentinlaval/CleanNote/actions/workflows/ci.yml/badge.svg?branch=main)
-![PyPI](https://github.com/corentinlaval/CleanNote/actions/workflows/release.yml/badge.svg?branch=main)
 [![codecov](https://codecov.io/gh/corentinlaval/CleanNote/branch/main/graph/badge.svg?branch=main)](https://codecov.io/gh/corentinlaval/CleanNote)
 [![PyPI version](https://img.shields.io/pypi/v/cleanote.svg)](https://pypi.org/project/cleanote/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
@@ -21,7 +20,15 @@ cd CleanNote
 python -m cleanote --config configs/base.yaml
 ```
 
-*(coming soon: install & usage instructions)*  
+---
+
+
+## Installation
+
+Depuis PyPI (version stable) :
+```bash
+pip install cleanote
+```
 
 ---
 

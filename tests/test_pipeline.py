@@ -140,11 +140,27 @@ def test_to_excel_success(tmp_path):
         os.chdir(cwd)
 
 
-def test_to_excel_called_before_apply_raises_attribute_error():
-    """Sans dataset_h (apply non appelé), to_excel doit lever AttributeError (NoneType.data)."""
+def test_to_excel_success(tmp_path, monkeypatch):
+    """to_excel crée un fichier et renvoie son chemin (par défaut 'dataset_h.xlsx')."""
     ds = FakeDataset()
     m_h = FakeModel()
     p = Pipeline(ds, m_h)
+    _ = p.apply()
 
-    with pytest.raises(AttributeError):
-        _ = p.to_excel()
+    # Monkeypatch: évite la dépendance à openpyxl dans le CI
+    def fake_to_excel(self, path, index=False):
+        p = os.fspath(path)
+        with open(p, "wb") as f:
+            f.write(b"OK")
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel, raising=True)
+
+    cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        path = p.to_excel()
+        assert path == "dataset_h.xlsx"
+        assert os.path.exists(path)
+        assert os.path.getsize(path) > 0
+    finally:
+        os.chdir(cwd)

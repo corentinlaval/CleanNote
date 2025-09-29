@@ -10,6 +10,23 @@
 
 ---
 
+## Installation
+First, make sure you are inside your Python virtual environment (e.g. `venv`).  
+To install the **latest available version** (see the PyPI badge above):
+
+```bash
+ pip install -U cleanote
+```
+
+If you want to install a specific version (for example 0.2.1):
+
+```bash
+ pip install -U cleanote==0.2.1
+```
+The latest released version is always displayed in the PyPI badge at the top of this README.
+
+---
+
 ## Quickstart  
 
 Clone the repository:  
@@ -20,15 +37,7 @@ cd CleanNote
 python -m cleanote --config configs/base.yaml
 ```
 
----
 
-
-## Installation
-
-Depuis PyPI (version stable) :
-```bash
-pip install cleanote
-```
 
 ---
 

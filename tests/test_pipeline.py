@@ -1,25 +1,24 @@
 # tests/test_pipeline.py
-import pandas as pd
+import os
 import re
+import pandas as pd
+import pytest
 
 from cleanote.pipeline import Pipeline
 
 
+# ----------------- Doubles de test -----------------
 class FakeDataset:
     """Dataset minimal compatible (DataFrame-only) pour tester Pipeline."""
-
     def __init__(self, field="full_note"):
         self.field = field
         self.name = "dummy/ds"
         self.limit = 2
-        self.data = pd.DataFrame(
-            {"index": [0, 1], field: ["hello world", "second row"]}
-        )
+        self.data = pd.DataFrame({"index": [0, 1], field: ["hello world", "second row"]})
 
 
 class FakeModel:
     """Mock de Model avec .run(dataset, prompt, output_col)."""
-
     def __init__(self):
         self.calls = []  # trace des appels
 
@@ -35,6 +34,7 @@ class FakeModel:
         return out
 
 
+# ----------------- Tests -----------------
 def test_pipeline_apply_happy_path(capsys):
     ds = FakeDataset(field="full_note")
     m_h = FakeModel()
@@ -50,7 +50,7 @@ def test_pipeline_apply_happy_path(capsys):
     assert "[Pipeline] Homogenization completed." in printed
     assert "[Pipeline] Pipeline completed." in printed
 
-    # Vérifie que model_h.run a été appelé avec le bon prompt + output_col
+    # run() a bien été appelé une fois avec le bon prompt et la bonne colonne
     assert len(m_h.calls) == 1
     call = m_h.calls[0]
     assert call["prompt"].lstrip().startswith("Analyze the document below")
@@ -77,7 +77,7 @@ def test_pipeline_no_side_effect_on_input():
 
 
 def test_build_prompt_contains_required_keys():
-    """Le prompt doit mentionner explicitement les 4 clés JSON attendues."""
+    """Le prompt doit mentionner explicitement les 4 clés JSON attendues et 'valid JSON'."""
     ds = FakeDataset()
     m_h = FakeModel()
     p = Pipeline(ds, m_h)
@@ -86,8 +86,11 @@ def test_build_prompt_contains_required_keys():
     for key in ["Symptoms", "MedicalConclusion", "Treatments", "Summary"]:
         assert key in prompt
 
-    # Le prompt doit rappeler 'valid JSON' ou similaire
+    # Le prompt doit rappeler 'valid JSON'
     assert re.search(r"\bvalid JSON\b", prompt, re.IGNORECASE) is not None
+
+    # Le prompt doit contenir 'Document:'
+    assert "Document:" in prompt
 
 
 def test_output_col_name_depends_on_field():
@@ -98,3 +101,46 @@ def test_output_col_name_depends_on_field():
 
     assert len(m_h.calls) == 1
     assert m_h.calls[0]["output_col"] == "note_text__h"
+
+
+def test_homogenize_returns_none_and_sets_dataset_h():
+    """homogenize() ne retourne rien mais doit positionner self.dataset_h."""
+    ds = FakeDataset()
+    m_h = FakeModel()
+    p = Pipeline(ds, m_h)
+
+    ret = p.homogenize()
+    assert ret is None
+    assert p.dataset_h is not None
+    # colonne créée
+    assert f"{ds.field}__h" in p.dataset_h.data.columns
+
+
+def test_to_excel_success(tmp_path):
+    """to_excel crée un fichier et renvoie son chemin (par défaut 'dataset_h.xlsx')."""
+    ds = FakeDataset()
+    m_h = FakeModel()
+    p = Pipeline(ds, m_h)
+    _ = p.apply()
+
+    # Exécute to_excel dans un répertoire temporaire
+    cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        path = p.to_excel()
+        assert path == "dataset_h.xlsx"
+        assert os.path.exists(path)
+        # Le fichier ne doit pas être vide
+        assert os.path.getsize(path) > 0
+    finally:
+        os.chdir(cwd)
+
+
+def test_to_excel_called_before_apply_raises_attribute_error():
+    """Sans dataset_h (apply non appelé), to_excel doit lever AttributeError (NoneType.data)."""
+    ds = FakeDataset()
+    m_h = FakeModel()
+    p = Pipeline(ds, m_h)
+
+    with pytest.raises(AttributeError):
+        _ = p.to_excel()

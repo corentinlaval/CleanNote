@@ -299,3 +299,145 @@ def test_run_generation_overrides(monkeypatch, patch_transformers):
     # On récupère le dernier appel pipeline et on vérifie l'override
     last_call = m._pipe.calls[-1]
     assert last_call["infer_kwargs"]["max_new_tokens"] == 3
+
+
+def test_dtype_normalization_for_pipeline_and_model(monkeypatch):
+    # On patch minimalement ce qu'il faut
+    from cleanote import model as model_mod
+
+    monkeypatch.setattr(
+        model_mod,
+        "AutoTokenizer",
+        type(
+            "X",
+            (),
+            {"from_pretrained": staticmethod(lambda name, **kw: FakeTokenizer())},
+        ),
+    )
+    monkeypatch.setattr(
+        model_mod,
+        "AutoModelForCausalLM",
+        type(
+            "Y",
+            (),
+            {
+                "from_pretrained": staticmethod(
+                    lambda name, **kw: FakeCausalModel(name, **kw)
+                )
+            },
+        ),
+    )
+
+    # pipeline recorder simple
+    class _P:
+        def __init__(self, *a, **kw):
+            self.calls = []
+
+        def __call__(self, *a, **kw):
+            self.calls.append((a, kw))
+            return [{"generated_text": "ok"}]
+
+    monkeypatch.setattr(model_mod, "pipeline", lambda *a, **kw: _P())
+
+    # On passe dtype (pipeline) et model_dtype (model) pour activer _normalize_dtypes
+    m = Model(
+        name="x/y",
+        task="text-generation",
+        dtype="float16",  # -> doit devenir torch_dtype dans pipeline_kwargs
+        model_dtype="float16",  # -> doit devenir torch_dtype dans model_kwargs
+    )
+
+    # Vérifie la normalisation
+    assert "dtype" not in m.pipeline_kwargs
+    assert m.pipeline_kwargs.get("torch_dtype") == "float16"
+    assert "dtype" not in m.model_kwargs
+    assert m.model_kwargs.get("torch_dtype") == "float16"
+
+
+def test_ensure_pad_token_sets_from_eos(monkeypatch):
+    from cleanote import model as model_mod
+
+    # On garde une référence directe au tokenizer retourné
+    tok = FakeTokenizer(pad_token_id=None, eos_token_id=42)  # pas de pad au départ
+
+    monkeypatch.setattr(
+        model_mod,
+        "AutoTokenizer",
+        type("X", (), {"from_pretrained": staticmethod(lambda name, **kw: tok)}),
+    )
+    monkeypatch.setattr(
+        model_mod,
+        "AutoModelForCausalLM",
+        type(
+            "Y",
+            (),
+            {
+                "from_pretrained": staticmethod(
+                    lambda name, **kw: FakeCausalModel(name, **kw)
+                )
+            },
+        ),
+    )
+
+    class _P:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __call__(self, *a, **kw):
+            return [{"generated_text": "ok"}]
+
+    monkeypatch.setattr(model_mod, "pipeline", lambda *a, **kw: _P())
+
+    _ = Model(name="repo/model", task="text-generation")
+
+    # Comme FakeTokenizer.eos_token = "<eos>", _ensure_pad_token doit l'avoir recopié
+    assert tok.pad_token == "<eos>"
+
+
+def test_generation_overrides_take_precedence(monkeypatch):
+    from cleanote import model as model_mod
+
+    class RecP:
+        def __init__(self, *a, **kw):
+            self.calls = []
+
+        def __call__(self, inputs, **infer_kwargs):
+            self.calls.append(infer_kwargs)
+            return [{"generated_text": "ok"}]
+
+    monkeypatch.setattr(
+        model_mod,
+        "AutoTokenizer",
+        type(
+            "X",
+            (),
+            {"from_pretrained": staticmethod(lambda name, **kw: FakeTokenizer())},
+        ),
+    )
+    monkeypatch.setattr(
+        model_mod,
+        "AutoModelForCausalLM",
+        type(
+            "Y",
+            (),
+            {
+                "from_pretrained": staticmethod(
+                    lambda name, **kw: FakeCausalModel(name, **kw)
+                )
+            },
+        ),
+    )
+    rec = RecP()
+    monkeypatch.setattr(model_mod, "pipeline", lambda *a, **kw: rec)
+
+    df = pd.DataFrame({"full_note": ["a"]})
+    ds = FakeDataset(df)
+
+    m = Model(
+        name="repo/model", task="text-generation", max_new_tokens=128, temperature=0.5
+    )
+    _ = m.run(ds, "p", max_new_tokens=3, temperature=0.0)
+
+    # L'override doit primer
+    assert rec.calls[-1]["max_new_tokens"] == 3
+    assert rec.calls[-1]["temperature"] == 0.0

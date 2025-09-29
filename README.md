@@ -1,10 +1,15 @@
-# CleanNote
+# CleanNote 
+[![English](https://img.shields.io/badge/lang-English-blue)](#english)
+[![Français](https://img.shields.io/badge/lang-Français-green)](#français)
+
 
 ![CI](https://github.com/corentinlaval/CleanNote/actions/workflows/ci.yml/badge.svg?branch=main)
 [![codecov](https://codecov.io/gh/corentinlaval/CleanNote/branch/main/graph/badge.svg?branch=main)](https://codecov.io/gh/corentinlaval/CleanNote)
 [![PyPI version](https://img.shields.io/pypi/v/cleanote.svg)](https://pypi.org/project/cleanote/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)  
 
+---
+## English
 
 **CleanNote** analyzes raw medical notes and transforms them into concise, structured documents focused on symptoms, medical conclusions, and treatments, enabling easier analysis and clinical research.
 
@@ -67,6 +72,71 @@ print(f"Excel file saved to : {xls}")
 ```
 
 ---
+
+## Français
+
+**CleanNote** analyse des notes médicales brutes et les transforme en documents concis et structurés, centrés sur les symptômes, les conclusions médicales et les traitements, afin de faciliter leur analyse et la recherche clinique.
+
+Cette solution a été développée dans le cadre d’un stage de recherche au laboratoire **** , et est actuellement démontrée à l’aide du jeu de données **AGBonnet/Augmented-clinical-notes** ainsi que du modèle **mistralai/Mistral-7B-Instruct-v0.3**.
+
+Ce travail a été supervisé par trois personnes :
+
+- **Mme** ****, tutrice entreprise et maîtresse de conférences, qui a proposé le sujet du pipeline de prétraitement,
+
+- **Mme** ****, tutrice école et maîtresse de conférences, qui m’a encadré sur les aspects de frugalité et de mise en forme,
+
+- **M.** ****, tuteur entreprise et doctorant, qui m’a accompagné sur l’identification des solutions adaptées et l’apport de connaissances du domaine.
+
+---
+
+## Installation
+Tout d’abord, assurez-vous d’être dans votre environnement virtuel Python (par ex. `venv`).  
+Pour installer la **dernière version disponible** (voir le badge PyPI ci-dessus) :
+
+```bash
+ pip install -U cleanote
+```
+
+Si vous souhaitez installer une version spécifique (par exemple `0.2.1`):
+
+```bash
+ pip install -U cleanote==0.2.1
+```
+La dernière version publiée est toujours affichée dans le badge PyPI en haut de ce README.
+
+---
+
+## Utilisation
+Après installation, vous pouvez utiliser **CleanNote** en seulement quelques lignes de code :
+
+```bash
+from cleanote.dataset import Dataset
+from cleanote.model import Model
+from cleanote.pipeline import Pipeline
+
+# Charger un jeu de données
+data = Dataset(name="AGBonnet/Augmented-clinical-notes", split="train", field="full_note", limit=1)
+
+# Charger un modèle
+model = Model(name="mistralai/Mistral-7B-Instruct-v0.3", max_new_tokens=512)
+
+# Créer le pipeline
+pipe = Pipeline(dataset=data, model_h=model)
+
+# Lancer le pipeline
+out = pipe.apply()
+
+# Afficher le résultat
+print(out.data.head())
+
+# Exporter le jeu de données homogénéisé
+xls = pipe.to_excel()  
+print(f"Fichier Excel sauvegardé : {xls}")
+```
+
+---
+
+
 
 ## Quickstart  
 

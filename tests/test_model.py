@@ -104,23 +104,34 @@ def test_text_generation_happy_path_df_adds_column_and_sets_defaults(
     # vérifie que le tokenizer a bien reçu use_fast=True
     assert patch_transformers["tokenizer_called_with"]["use_fast"] is True
 
-    # run => ajoute une colonne auto-nommée
+    # run => ajoute une colonne "Output"
     out_ds = m.run(ds, prompt="count words please")
-    new_cols = [c for c in out_ds.data.columns if c.startswith(ds.field + "__")]
-    assert len(new_cols) == 1
-    col = new_cols[0]
-    assert list(out_ds.data[col]) == ["GEN_OUT", "GEN_OUT"]
+    assert "Output" in out_ds.data.columns
+    assert list(out_ds.data["Output"]) == ["GEN_OUT", "GEN_OUT"]
     # l'original est préservé
     assert list(out_ds.data[ds.field]) == ["hello", "world"]
     # garde un pointeur vers la dernière colonne
-    assert out_ds.last_output_col == col
+    assert out_ds.last_output_col == "Output"
 
     # pipeline kwargs: device par défaut = -1 si non fourni
     assert patch_transformers["pipeline_called_with"]["kwargs"].get("device", -2) == -1
+    # return_full_text par défaut = False
+    assert (
+        patch_transformers["pipeline_called_with"]["kwargs"].get("return_full_text")
+        is False
+    )
 
     # generation_kwargs: max_length doit avoir été retiré si max_new_tokens présent
     assert "max_length" not in m.generation_kwargs
     assert m.generation_kwargs["max_new_tokens"] == 8
+    # valeurs par défaut
+    assert m.generation_kwargs["do_sample"] is False
+    assert m.generation_kwargs["temperature"] == 0.0
+    assert m.generation_kwargs["top_p"] == 1.0
+
+    # model kwargs par défaut
+    assert patch_transformers["causal_model_called_with"]["low_cpu_mem_usage"] is True
+    assert patch_transformers["causal_model_called_with"]["use_safetensors"] is True
 
 
 def test_unsupported_task_raises_value_error():
@@ -129,19 +140,14 @@ def test_unsupported_task_raises_value_error():
 
 
 def test_output_col_collision_is_suffixed(patch_transformers):
-    df = pd.DataFrame(
-        {"index": [0], "full_note": ["x"], "full_note__facebook_opt_350m": ["exists"]}
-    )
+    # Collision volontaire sur "Output"
+    df = pd.DataFrame({"index": [0], "full_note": ["x"], "Output": ["exists"]})
     ds = FakeDataset(df)
 
     m = Model(name="facebook/opt-350m", task="text-generation")
     out_ds = m.run(ds, prompt="p")
-    # collision => suffix _1
-    cols = [
-        c for c in out_ds.data.columns if c.startswith("full_note__facebook_opt_350m")
-    ]
-    assert "full_note__facebook_opt_350m" in cols
-    assert "full_note__facebook_opt_350m_1" in cols
+    assert "Output" in out_ds.data.columns
+    assert "Output_1" in out_ds.data.columns
 
 
 def test_run_respects_explicit_output_col(patch_transformers):
@@ -236,8 +242,8 @@ def test_run_handles_dict_response(monkeypatch, patch_transformers):
     m = Model(name="repo/model", task="text-generation")
 
     out_ds = m.run(ds, "p")
-    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
-    assert list(out_ds.data[new_col]) == ["GEN_OUT", "GEN_OUT"]
+    assert "Output" in out_ds.data.columns
+    assert list(out_ds.data["Output"]) == ["GEN_OUT", "GEN_OUT"]
 
 
 def test_run_handles_non_list_non_dict_response(monkeypatch, patch_transformers):
@@ -265,8 +271,8 @@ def test_run_handles_non_list_non_dict_response(monkeypatch, patch_transformers)
     m = Model(name="repo/model", task="text-generation")
 
     out_ds = m.run(ds, "p")
-    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
-    assert list(out_ds.data[new_col]) == ["PLAIN"]
+    assert "Output" in out_ds.data.columns
+    assert list(out_ds.data["Output"]) == ["PLAIN"]
 
 
 def test_run_generation_overrides(monkeypatch, patch_transformers):
@@ -293,8 +299,8 @@ def test_run_generation_overrides(monkeypatch, patch_transformers):
     m = Model(name="repo/model", task="text-generation", max_new_tokens=128)
 
     out_ds = m.run(ds, "p", max_new_tokens=3)  # <-- override
-    new_col = [c for c in out_ds.data.columns if c.startswith("full_note__")][0]
-    assert list(out_ds.data[new_col]) == ["OVERRIDE_OK"]
+    assert "Output" in out_ds.data.columns
+    assert list(out_ds.data["Output"]) == ["OVERRIDE_OK"]
 
     # On récupère le dernier appel pipeline et on vérifie l'override
     last_call = m._pipe.calls[-1]
@@ -459,3 +465,63 @@ def test_run_raises_if_no_data_attr(patch_transformers):
     with pytest.raises(ValueError) as e:
         m.run(BadDs(), "prompt")
     assert "No attribute 'data'" in str(e.value)
+
+
+def test_postprocessing_extracts_json_to_columns(monkeypatch, patch_transformers):
+    """Vérifie que le bloc JSON est extrait et mappe vers Symptoms / MedicalConclusion / Treatments / Summary."""
+    from cleanote import model as model_mod
+
+    json_block = (
+        '{"Symptoms": ["A", "B"], "MedicalConclusion": ["C"], '
+        '"Treatments": ["T1"], "Summary": "S"}'
+    )
+    payload = f"some text before {json_block} after"
+
+    class JsonPipeline:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __call__(self, *a, **kw):
+            return [{"generated_text": payload}]
+
+    monkeypatch.setattr(model_mod, "pipeline", lambda *a, **kw: JsonPipeline())
+
+    df = pd.DataFrame({"full_note": ["note1", "note2"]})
+    ds = FakeDataset(df)
+    m = Model(name="repo/model", task="text-generation")
+    out = m.run(ds, "prompt here")
+
+    assert "Output" in out.data.columns
+    assert out.data["Symptoms"].iloc[0] == ["A", "B"]
+    assert out.data["MedicalConclusion"].iloc[0] == ["C"]
+    assert out.data["Treatments"].iloc[0] == ["T1"]
+    assert out.data["Summary"].iloc[0] == "S"
+
+
+def test_postprocessing_defaults_when_no_json(monkeypatch, patch_transformers):
+    """Sans JSON valide, les colonnes existent mais avec valeurs par défaut ([], [], [], "")."""
+    from cleanote import model as model_mod
+
+    class PlainPipeline:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __call__(self, *a, **kw):
+            return [{"generated_text": "no json here"}]
+
+    monkeypatch.setattr(model_mod, "pipeline", lambda *a, **kw: PlainPipeline())
+
+    df = pd.DataFrame({"full_note": ["n"]})
+    ds = FakeDataset(df)
+    m = Model(name="repo/model", task="text-generation")
+    out = m.run(ds, "p")
+
+    assert "Symptoms" in out.data.columns
+    assert "MedicalConclusion" in out.data.columns
+    assert "Treatments" in out.data.columns
+    assert "Summary" in out.data.columns
+
+    assert out.data["Symptoms"].iloc[0] == []
+    assert out.data["MedicalConclusion"].iloc[0] == []
+    assert out.data["Treatments"].iloc[0] == []
+    assert out.data["Summary"].iloc[0] == ""

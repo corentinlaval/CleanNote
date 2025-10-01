@@ -75,12 +75,15 @@ def _extract_json_block(text: str) -> dict:
 class Model:
     """Wrapper simple pour modèles de génération de texte (text-generation uniquement)."""
 
-    def __init__(self, name: str, task: str = "text-generation", **kwargs: Any):
+    def __init__(
+        self, name: str, task: str = "text-generation", prompt: str = "", **kwargs: Any
+    ):
         if task != "text-generation":
             raise ValueError("Only 'text-generation' is supported in this Model.")
 
         self.name = name
         self.task = task
+        self.prompt = prompt
 
         (
             self.pipeline_kwargs,
@@ -138,7 +141,7 @@ class Model:
         )
         print("[Model] Load completed.")
 
-    def run(self, dataset, prompt: str, output_col: str | None = None, **gen_overrides):
+    def run(self, dataset, output_col: str | None = None, **gen_overrides):
         if not hasattr(dataset, "data"):
             raise ValueError("[Model] No attribute 'data' found on dataset.")
 
@@ -164,7 +167,7 @@ class Model:
         outs = []
         for txt in texts:
             print("[Model] Defining the prompt...")
-            inp = f"{prompt}\n\n{txt}".strip()
+            inp = f"{self.prompt}\n\n{txt}".strip()
 
             print("[Model] Generating...")
             result = self._pipe(inp, **infer_kwargs)

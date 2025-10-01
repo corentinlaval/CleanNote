@@ -27,7 +27,7 @@ This work was supervised by three people:
 
 - **Ms.** ****, school supervisor and associate professor, who guided me on frugality aspects and formatting,
 
-- **Mr.** ****, company supervisor and PhD student, who provided support on identifying adapted solutions and domain knowledge.
+- **Mr.** ****, PhD student, who provided support on identifying adapted solutions and domain knowledge.
 
 ---
 
@@ -121,7 +121,7 @@ Ce travail a été supervisé par trois personnes :
 
 - **Mme** ****, tutrice école et maîtresse de conférences, qui m’a encadré sur les aspects de frugalité et de mise en forme,
 
-- **M.** ****, tuteur entreprise et doctorant, qui m’a accompagné sur l’identification des solutions adaptées et l’apport de connaissances du domaine.
+- **M.** ****, doctorant, qui m’a accompagné sur l’identification des solutions adaptées et l’apport de connaissances du domaine.
 
 ---
 

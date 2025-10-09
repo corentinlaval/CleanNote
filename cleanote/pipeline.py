@@ -16,7 +16,11 @@ class Pipeline:
     def homogenize(self):
 
         print("[Pipeline] Prompt for Homogenization:")
-        print(self.model_h.prompt)
+        if self.model_h.prompt:
+            print(self.model_h.prompt)
+        else:
+            self.model_h.prompt = self.build_prompt_h()
+            print(self.model_h.prompt)
 
         print("[Pipeline] Start Homogenization...")
 
@@ -27,22 +31,22 @@ class Pipeline:
         print("[Pipeline] Homogenization completed.")
         return
 
-    # def build_prompt_h(self) -> str:
-    #     return """Analyze the document below and return a single, valid JSON object with exactly these keys (no trailing commas):
+    def build_prompt_h(self) -> str:
+        return """Analyze the document below and return a single, valid JSON object with exactly these keys (no trailing commas):
 
-    #         {{
-    #         "Symptoms": [/* list of symptoms extracted from the document */],
-    #         "MedicalConclusion": [/* list of medical conclusion extracted from the document */],
-    #         "Treatments": [/* list of treatments extracted from the document */],
-    #         "Summary": "/* a professional paragraph summarizing the note, that mentions only items already listed in Symptoms, MedicalConclusion, and Treatments, without inventing anything */"
-    #         }}
+            {{
+            "Symptoms": [/* list of symptoms extracted from the document */],
+            "MedicalConclusion": [/* list of medical conclusion extracted from the document */],
+            "Treatments": [/* list of treatments extracted from the document */],
+            "Summary": "/* a professional paragraph summarizing the note, that mentions only items already listed in Symptoms, MedicalConclusion, and Treatments, without inventing anything */"
+            }}
 
-    #         - If no information exists for a given key, return an empty array for that key.
-    #         - The Summary field **must use only** the items already extracted above and **must not add** any new facts.
-    #         - Ensure the output is **syntactically valid JSON**.
+            - If no information exists for a given key, return an empty array for that key.
+            - The Summary field **must use only** the items already extracted above and **must not add** any new facts.
+            - Ensure the output is **syntactically valid JSON**.
 
-    #         Document:
-    #         """
+            Document:
+            """
 
     def to_excel(self) -> str:
         self.dataset_h.data.to_excel("dataset_h.xlsx", index=False)

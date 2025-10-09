@@ -165,7 +165,8 @@ class Model:
         infer_kwargs = {**self.generation_kwargs, **gen_overrides}
 
         outs = []
-        for txt in texts:
+        for i, txt in enumerate(texts, start=1):
+            print(f"\n===== Note {i}/{len(texts)} =====")
             print("[Model] Defining the prompt...")
             inp = f"{self.prompt}\n\n{txt}".strip()
 

@@ -7,6 +7,7 @@ import spacy
 import pandas as pd
 import numpy as np
 import warnings
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,72 @@ class Pipeline:
         self._ensure_spacy()
         self._ensure_nli()
         logger.info({"id2label": self._id2label})
+
+        df = self.dataset_h.data
+        text_col = self.dataset.field
+        out_h_col = f"{self.dataset.field}__h"
+
+        # Ajout des colonnes de sortie si absentes
+        for col in ("nli_ent_mean", "nli_neu_mean", "nli_con_mean"):
+            if col not in df.columns:
+                df[col] = np.nan
+
+        for idx, row in df.iterrows():
+            text = str(row.get(text_col, "") or "").strip()
+            if not text:
+                continue
+
+            # Découper le texte en phrases
+            premises = self.decouper_texte_en_phrases(text)
+            if not premises:
+                continue
+
+            # Extraire les hypothèses à partir du JSON homogénéisé
+            hypotheses = self._extract_hypotheses(row.get(out_h_col))
+            if not hypotheses:
+                continue
+
+            # Calculer la matrice NLI (chaque phrase vs chaque hypothèse)
+            matrice = self.generer_table(
+                premises,
+                hypotheses,
+                lambda p, h: self.nli(p, h, return_probs=True),
+            )
+
+            # Calculer la moyenne des meilleures hypothèses par phrase
+            avg = self.average(premises, hypotheses, matrice)
+
+            # Ajouter les moyennes dans le DataFrame
+            df.at[idx, "nli_ent_mean"] = avg["entailment"]
+            df.at[idx, "nli_neu_mean"] = avg["neutral"]
+            df.at[idx, "nli_con_mean"] = avg["contradiction"]
+
         logger.info("[Pipeline] NLI verification completed.")
+
+    def _extract_hypotheses(self, h_json) -> List[str]:
+        """Récupère Summary + listes depuis le JSON homogénéisé."""
+        if not h_json:
+            return []
+        try:
+            data = json.loads(h_json) if isinstance(h_json, str) else h_json
+        except Exception:
+            return []
+
+        if not isinstance(data, dict):
+            return []
+
+        hypotheses = []
+        summary = str(data.get("Summary") or "").strip()
+        if summary:
+            hypotheses.append(summary)
+
+        for key in ("Symptoms", "MedicalConclusion", "Treatments"):
+            val = data.get(key)
+            if isinstance(val, list):
+                hypotheses.extend([str(v).strip() for v in val if str(v).strip()])
+
+        # Supprimer les doublons
+        return list(dict.fromkeys(hypotheses))
 
     # ------------------------- NLI utils -------------------------
 
@@ -134,7 +200,7 @@ class Pipeline:
     def decouper_texte_en_phrases(self, texte: str) -> List[str]:
         nlp = self._ensure_spacy()
         doc = nlp(texte)
-        return [sent.text.strip() for sent in doc.sents]
+        return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
 
     def _ensure_spacy(self):
         if self._nlp is None:
@@ -174,7 +240,6 @@ class Pipeline:
     def _prettier(res: Dict) -> Dict:
         """Nettoie/valide une cellule { 'probs': {...} } -> retourne le dict des probs."""
         probs = (res or {}).get("probs", {})
-        # Optionnel: assurer la présence des trois clés
         for k in ("entailment", "neutral", "contradiction"):
             probs.setdefault(k, None)
         return probs

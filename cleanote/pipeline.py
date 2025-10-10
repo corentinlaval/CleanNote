@@ -40,27 +40,27 @@ class Pipeline:
     # ------------------------- Orchestration -------------------------
 
     def apply(self):
-        logger.info("[Pipeline] Starting pipeline...")
+        print("[Pipeline] Starting pipeline...")
         self.homogenize()
         self.verify_QuickUMLS()
         self.verify_NLI()
-        logger.info("[Pipeline] Pipeline completed.")
+        print("[Pipeline] Pipeline completed.")
         return self.dataset_h
 
     # ------------------------- Homogénéisation -------------------------
 
     def homogenize(self):
-        logger.info("[Pipeline] Prompt for Homogenization:")
+        print("[Pipeline] Prompt for Homogenization:")
         if self.model_h.prompt:
-            logger.info(self.model_h.prompt)
+            print(self.model_h.prompt)
         else:
             self.model_h.prompt = self.build_prompt_h()
-            logger.info(self.model_h.prompt)
+            print(self.model_h.prompt)
 
-        logger.info("[Pipeline] Start Homogenization...")
+        print("[Pipeline] Start Homogenization...")
         out_h_col = f"{self.dataset.field}__h"
         self.dataset_h = self.model_h.run(self.dataset, output_col=out_h_col)
-        logger.info("[Pipeline] Homogenization completed.")
+        print("[Pipeline] Homogenization completed.")
 
     @staticmethod
     def build_prompt_h() -> str:
@@ -83,14 +83,14 @@ class Pipeline:
 
     def verify_QuickUMLS(self):
         # Placeholder: branchement futur à QuickUMLS
-        logger.info("[Pipeline] Starting QuickUMLS verification...")
-        logger.info("[Pipeline] QuickUMLS verification completed.")
+        print("[Pipeline] Starting QuickUMLS verification...")
+        print("[Pipeline] QuickUMLS verification completed.")
 
     def verify_NLI(self):
-        logger.info("[Pipeline] Starting NLI verification...")
+        print("[Pipeline] Starting NLI verification...")
         self._ensure_spacy()
         self._ensure_nli()
-        logger.info({"id2label": self._id2label})
+        print({"id2label": self._id2label})
 
         df = self.dataset_h.data
         text_col = self.dataset.field
@@ -131,7 +131,7 @@ class Pipeline:
             df.at[idx, "nli_neu_mean"] = avg["neutral"]
             df.at[idx, "nli_con_mean"] = avg["contradiction"]
 
-        logger.info("[Pipeline] NLI verification completed.")
+        print("[Pipeline] NLI verification completed.")
 
     def _extract_hypotheses(self, h_json) -> List[str]:
         """Récupère Summary + listes depuis le JSON homogénéisé."""
@@ -209,7 +209,7 @@ class Pipeline:
             except OSError:
                 from spacy.cli import download
 
-                logger.info("Downloading spaCy model: en_core_web_sm")
+                print("Downloading spaCy model: en_core_web_sm")
                 download("en_core_web_sm")
                 self._nlp = spacy.load("en_core_web_sm")
         return self._nlp
@@ -269,7 +269,7 @@ class Pipeline:
         mean_best_neu = float(np.nanmean(best_neu_vals)) if best_neu_vals else None
         mean_best_con = float(np.nanmean(best_con_vals)) if best_con_vals else None
 
-        logger.info(
+        print(
             "Moyennes — entailment=%s, neutral=%s, contradiction=%s",
             mean_best_ent,
             mean_best_neu,

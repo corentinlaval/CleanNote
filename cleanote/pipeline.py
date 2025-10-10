@@ -128,8 +128,11 @@ class Pipeline:
 
             # Ajouter les moyennes dans le DataFrame
             df.at[idx, "nli_ent_mean"] = avg["entailment"]
+            print("entailment: ", avg["entailment"])
             df.at[idx, "nli_neu_mean"] = avg["neutral"]
+            print("neutral: ", avg["neutral"])
             df.at[idx, "nli_con_mean"] = avg["contradiction"]
+            print("contradiction: ", avg["contradiction"])
 
         print("[Pipeline] NLI verification completed.")
 

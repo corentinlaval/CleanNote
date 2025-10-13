@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable, Callable, Dict, List, Optional
+from typing import Iterable, Callable, Dict, List, Optional, Any
 
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -95,72 +95,77 @@ class Pipeline:
         self._ensure_nli()
 
         df = self.dataset_h.data
-        print(list(df.columns))
         text_col = self.dataset.field
         out_h_col = f"{self.dataset.field}__h"
 
-        # Ajout des colonnes de sortie si absentes
+        # Colonnes résultats
         for col in ("nli_ent_mean", "nli_neu_mean", "nli_con_mean"):
             if col not in df.columns:
                 df[col] = np.nan
 
         for idx, row in df.iterrows():
-            text = str(row.get("full_note"))
-            print(f"\n===== Note {idx + 1}/{len(df)} =====")
-            print(f"[Pipeline] FN: {text[:60]}...")
-            if not text:
-                print(f"[Pipeline] Row {idx} has empty text, skipping NLI.")
+            # 1) Texte source (comme src_sents dans Colab)
+            src_text = (row.get(text_col) or "").strip()
+
+            # 2) Résumé/hypothèses (comme sum_sents dans Colab)
+            summ_text = (row.get("Summary") or "").strip()
+            if not summ_text and out_h_col in df.columns:
+                try:
+                    payload = row[out_h_col]
+                    payload = (
+                        json.loads(payload)
+                        if isinstance(payload, str)
+                        else (payload or {})
+                    )
+                    summ_text = (payload or {}).get("Summary", "") or ""
+                except Exception:
+                    pass
+            summ_text = summ_text.strip()
+
+            if not src_text or not summ_text:
+                print(f"[Pipeline] Row {idx}: texte ou résumé vide, skip.")
                 continue
 
-            # Découper le texte en phrases
-            print(text)
-            premises = self.decouper_texte_en_phrases(text)
-            print(f"[Pipeline] Extracted {len(premises)} sentences.")
-            print(premises)
-            if not premises:
-                print(f"[Pipeline] Row {idx} has no sentences, skipping NLI.")
+            premises = self.decouper_texte_en_phrases(src_text)  # source
+            hypotheses = self.decouper_texte_en_phrases(summ_text)  # résumé
+
+            if not premises or not hypotheses:
+                print(f"[Pipeline] Row {idx}: pas de phrases, skip.")
                 continue
 
-            # Extraire les hypothèses à partir du JSON homogénéisé
-            hypotheses = str(row.get("Summary"))
-            print(f"\n===== Note {idx + 1}/{len(df)} =====")
-            print(f"[Pipeline] Summ: {hypotheses[:60]}...")
-            if not hypotheses:
-                print(f"[Pipeline] Row {idx} has no hypotheses, skipping NLI.")
-                continue
-
-            hypotheses = self.decouper_texte_en_phrases(hypotheses)
-            print(f"[Pipeline] Extracted {len(hypotheses)} sentences.")
-            if not hypotheses:
-                print(f"[Pipeline] Row {idx} has no Summ sentences, skipping NLI.")
-                continue
-
-            # Calculer la matrice NLI (chaque phrase vs chaque hypothèse)
+            # >>> ALIGNÉ COLAB <<<
+            # Colab: matrice = generer_table(sum_sents, src_sents, nli)
+            # Donc chaque cellule = nli(premise=src, hypothesis=sum)
             matrice = self.generer_table(
-                premises,
-                hypotheses,
-                lambda p, h: self.nli(p, h, return_probs=True),
+                hypotheses,  # lignes = résumé
+                premises,  # colonnes = source
+                lambda h, p: self.nli(p, h, return_probs=True),
             )
-            print("[Pipeline] NLI matrix computed.")
-            print(matrice)
 
-            # Calculer la moyenne des meilleures hypothèses par phrase
-            avg = self.average(premises, hypotheses, matrice)
+            # Moyenne "best source per hypothesis" exactement comme Colab
+            avg = self.average(hypotheses, premises, matrice)
 
-            # Ajouter les moyennes dans le DataFrame
             df.at[idx, "nli_ent_mean"] = avg["entailment"]
-            print("entailment: ", avg["entailment"])
             df.at[idx, "nli_neu_mean"] = avg["neutral"]
-            print("neutral: ", avg["neutral"])
             df.at[idx, "nli_con_mean"] = avg["contradiction"]
-            print("contradiction: ", avg["contradiction"])
+
+            print(
+                f"[Pipeline] Row {idx} → entail={avg['entailment']}, neutral={avg['neutral']}, contra={avg['contradiction']}"
+            )
 
         print("[Pipeline] NLI verification completed.")
 
-    def nli(self, premise: str, hypothesis: str, return_probs: bool = True) -> Dict:
-        """Retourne la prédiction NLI et (optionnellement) les probabilités."""
-        self._ensure_nli()
+    def _ensure_nlp(self):
+        if self._nlp is None:
+            try:
+                self._nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                self._nlp = spacy.blank("en")
+                if "sentencizer" not in self._nlp.pipe_names:
+                    self._nlp.add_pipe("sentencizer")
 
+    def nli(self, premise: str, hypothesis: str, return_probs: bool = True) -> Dict:
+        self._ensure_nli()
         inputs = self._tok(
             premise,
             hypothesis,
@@ -180,7 +185,7 @@ class Pipeline:
         pred_idx = int(torch.argmax(probs_t))
         pred_label = self._id2label[pred_idx]
 
-        res = {
+        return {
             "premise": premise,
             "hypothesis": hypothesis,
             "prediction": pred_label,
@@ -190,14 +195,13 @@ class Pipeline:
                 else None
             ),
         }
-        return res
 
     # ------------------------- spaCy utils -------------------------
 
     def decouper_texte_en_phrases(self, texte: str) -> List[str]:
-        nlp = spacy.load("en_core_web_sm")
-        doc = nlp(texte)
-        return [sent.text.strip() for sent in doc.sents]
+        self._ensure_nlp()
+        doc = self._nlp(texte or "")
+        return [s.text.strip() for s in doc.sents if s.text.strip()]
 
     # ------------------------- NLI model load -------------------------
 
@@ -209,7 +213,9 @@ class Pipeline:
             )
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             self._clf = self._clf.to(self.device)
-            self._id2label = self._clf.config.id2label
+            self._id2label = {
+                i: lbl.lower() for i, lbl in self._clf.config.id2label.items()
+            }
         return self._tok, self._clf, self._id2label
 
     # ------------------------- Tableaux & métriques -------------------------
@@ -218,23 +224,20 @@ class Pipeline:
         self,
         lignes: Iterable,
         colonnes: Iterable,
-        fonction: Callable[[any, any], Dict],
+        fonction: Callable[[Any, Any], Dict],
     ) -> List[List[Dict]]:
-        """Construit une matrice en appliquant fonction(ligne, colonne) et renvoie les dict résultats."""
         return [[self._prettier(fonction(i, j)) for j in colonnes] for i in lignes]
 
     @staticmethod
     def _prettier(res: Dict) -> Dict:
-        """Nettoie/valide une cellule { 'probs': {...} } -> retourne le dict des probs."""
-        probs = (res or {}).get("probs", {})
+        probs = (res or {}).get("probs", {}) or {}
+        # Les clés sont déjà normalisées en minuscules dans nli()
         for k in ("entailment", "neutral", "contradiction"):
             probs.setdefault(k, None)
         return probs
 
     def average(self, lignes: Iterable, colonnes: Iterable, matrice: List[List[Dict]]):
-        """Calcule les moyennes des meilleures colonnes (entailment max par ligne)."""
         df = pd.DataFrame(matrice, index=list(lignes), columns=list(colonnes))
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=FutureWarning)
             entailments = df.applymap(
@@ -257,10 +260,7 @@ class Pipeline:
         mean_best_con = float(np.nanmean(best_con_vals)) if best_con_vals else None
 
         print(
-            "Moyennes — entailment=%s, neutral=%s, contradiction=%s",
-            mean_best_ent,
-            mean_best_neu,
-            mean_best_con,
+            f"Moyennes — entailment={mean_best_ent}, neutral={mean_best_neu}, contradiction={mean_best_con}"
         )
         return {
             "entailment": mean_best_ent,

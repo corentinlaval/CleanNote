@@ -140,6 +140,8 @@ class Pipeline:
                 hypotheses,
                 lambda p, h: self.nli(p, h, return_probs=True),
             )
+            print("[Pipeline] NLI matrix computed.")
+            print(matrice)
 
             # Calculer la moyenne des meilleures hypothèses par phrase
             avg = self.average(premises, hypotheses, matrice)
@@ -153,33 +155,6 @@ class Pipeline:
             print("contradiction: ", avg["contradiction"])
 
         print("[Pipeline] NLI verification completed.")
-
-    def _extract_hypotheses(self, h_json) -> List[str]:
-        """Récupère Summary + listes depuis le JSON homogénéisé."""
-        if not h_json:
-            return []
-        try:
-            data = json.loads(h_json) if isinstance(h_json, str) else h_json
-        except Exception:
-            return []
-
-        if not isinstance(data, dict):
-            return []
-
-        hypotheses = []
-        summary = str(data.get("Summary") or "").strip()
-        if summary:
-            hypotheses.append(summary)
-
-        for key in ("Symptoms", "MedicalConclusion", "Treatments"):
-            val = data.get(key)
-            if isinstance(val, list):
-                hypotheses.extend([str(v).strip() for v in val if str(v).strip()])
-
-        # Supprimer les doublons
-        return list(dict.fromkeys(hypotheses))
-
-    # ------------------------- NLI utils -------------------------
 
     def nli(self, premise: str, hypothesis: str, return_probs: bool = True) -> Dict:
         """Retourne la prédiction NLI et (optionnellement) les probabilités."""

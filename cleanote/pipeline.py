@@ -93,6 +93,8 @@ class Pipeline:
         print({"id2label": self._id2label})
 
         df = self.dataset_h.data
+        print(f"[Pipeline] Processing {len(df)} rows...")
+        print(df.head(2))
         text_col = self.dataset.field
         out_h_col = f"{self.dataset.field}__h"
 
@@ -104,16 +106,19 @@ class Pipeline:
         for idx, row in df.iterrows():
             text = str(row.get(text_col, "") or "").strip()
             if not text:
+                print(f"[Pipeline] Row {idx} has empty text, skipping NLI.")
                 continue
 
             # Découper le texte en phrases
             premises = self.decouper_texte_en_phrases(text)
             if not premises:
+                print(f"[Pipeline] Row {idx} has no sentences, skipping NLI.")
                 continue
 
             # Extraire les hypothèses à partir du JSON homogénéisé
             hypotheses = self._extract_hypotheses(row.get(out_h_col))
             if not hypotheses:
+                print(f"[Pipeline] Row {idx} has no hypotheses, skipping NLI.")
                 continue
 
             # Calculer la matrice NLI (chaque phrase vs chaque hypothèse)

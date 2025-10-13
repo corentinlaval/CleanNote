@@ -127,7 +127,11 @@ class Pipeline:
                 continue
 
             premises = self.decouper_texte_en_phrases(src_text)  # source
+            print(f"[Pipeline] Row {idx}: {len(premises)} premises.")
+            print(premises)
             hypotheses = self.decouper_texte_en_phrases(summ_text)  # résumé
+            print(f"[Pipeline] Row {idx}: {len(hypotheses)} hypotheses.")
+            print(hypotheses)
 
             if not premises or not hypotheses:
                 print(f"[Pipeline] Row {idx}: pas de phrases, skip.")

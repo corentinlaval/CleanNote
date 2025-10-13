@@ -92,7 +92,6 @@ class Pipeline:
 
     def verify_NLI(self):
         print("[Pipeline] Starting NLI verification...")
-        self._ensure_spacy()
         self._ensure_nli()
 
         df = self.dataset_h.data

@@ -194,21 +194,9 @@ class Pipeline:
     # ------------------------- spaCy utils -------------------------
 
     def decouper_texte_en_phrases(self, texte: str) -> List[str]:
-        nlp = self._ensure_spacy()
+        nlp = spacy.load("en_core_web_sm")
         doc = nlp(texte)
-        return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
-
-    def _ensure_spacy(self):
-        if self._nlp is None:
-            try:
-                self._nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                from spacy.cli import download
-
-                print("Downloading spaCy model: en_core_web_sm")
-                download("en_core_web_sm")
-                self._nlp = spacy.load("en_core_web_sm")
-        return self._nlp
+        return [sent.text.strip() for sent in doc.sents]
 
     # ------------------------- NLI model load -------------------------
 

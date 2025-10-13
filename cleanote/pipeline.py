@@ -113,8 +113,10 @@ class Pipeline:
                 continue
 
             # Découper le texte en phrases
+            print(text)
             premises = self.decouper_texte_en_phrases(text)
             print(f"[Pipeline] Extracted {len(premises)} sentences.")
+            print(premises)
             if not premises:
                 print(f"[Pipeline] Row {idx} has no sentences, skipping NLI.")
                 continue

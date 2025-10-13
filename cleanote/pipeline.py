@@ -117,6 +117,7 @@ class Pipeline:
 
             # Extraire les hypothèses à partir du JSON homogénéisé
             hypotheses = self._extract_hypotheses(row.get(out_h_col))
+            print(row.get(out_h_col))
             if not hypotheses:
                 print(f"[Pipeline] Row {idx} has no hypotheses, skipping NLI.")
                 continue

@@ -202,15 +202,14 @@ class Pipeline:
     # ------------------------- NLI model load -------------------------
 
     def _ensure_nli(self):
-
-        self.tok = AutoTokenizer.from_pretrained(self.NLI_MODEL_NAME)
-        self.clf = AutoModelForSequenceClassification.from_pretrained(
-            self.NLI_MODEL_NAME
-        )
-
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.clf = self.clf.to(self.device)
-        self._id2label = self._clf.config.id2label
+        if self._tok is None or self._clf is None:
+            self._tok = AutoTokenizer.from_pretrained(self.NLI_MODEL_NAME)
+            self._clf = AutoModelForSequenceClassification.from_pretrained(
+                self.NLI_MODEL_NAME
+            )
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._clf = self._clf.to(self.device)
+            self._id2label = self._clf.config.id2label
         return self._tok, self._clf, self._id2label
 
     # ------------------------- Tableaux & métriques -------------------------

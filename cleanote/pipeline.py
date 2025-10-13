@@ -84,17 +84,18 @@ class Pipeline:
     def verify_QuickUMLS(self):
         # Placeholder: branchement futur à QuickUMLS
         print("[Pipeline] Starting QuickUMLS verification...")
+        df = self.dataset_h.data
+        print(f"[Pipeline] Processing {len(df)} rows...")
+        print(df.head(4))
+        print(list(df.columns))
         print("[Pipeline] QuickUMLS verification completed.")
 
     def verify_NLI(self):
         print("[Pipeline] Starting NLI verification...")
         self._ensure_spacy()
         self._ensure_nli()
-        print({"id2label": self._id2label})
 
         df = self.dataset_h.data
-        print(f"[Pipeline] Processing {len(df)} rows...")
-        print(df.head(4))
         print(list(df.columns))
         text_col = self.dataset.field
         out_h_col = f"{self.dataset.field}__h"
@@ -105,22 +106,32 @@ class Pipeline:
                 df[col] = np.nan
 
         for idx, row in df.iterrows():
-            text = str(row.get(text_col, "") or "").strip()
+            text = str(row.get("full_note"))
+            print(f"\n===== Note {idx + 1}/{len(df)} =====")
+            print(f"[Pipeline] FN: {text[:60]}...")
             if not text:
                 print(f"[Pipeline] Row {idx} has empty text, skipping NLI.")
                 continue
 
             # Découper le texte en phrases
             premises = self.decouper_texte_en_phrases(text)
+            print(f"[Pipeline] Extracted {len(premises)} sentences.")
             if not premises:
                 print(f"[Pipeline] Row {idx} has no sentences, skipping NLI.")
                 continue
 
             # Extraire les hypothèses à partir du JSON homogénéisé
-            hypotheses = self._extract_hypotheses(row.get(out_h_col))
-            print(row.get(out_h_col))
+            hypotheses = str(row.get("Summary"))
+            print(f"\n===== Note {idx + 1}/{len(df)} =====")
+            print(f"[Pipeline] Summ: {hypotheses[:60]}...")
             if not hypotheses:
                 print(f"[Pipeline] Row {idx} has no hypotheses, skipping NLI.")
+                continue
+
+            hypotheses = self.decouper_texte_en_phrases(hypotheses)
+            print(f"[Pipeline] Extracted {len(hypotheses)} sentences.")
+            if not hypotheses:
+                print(f"[Pipeline] Row {idx} has no Summ sentences, skipping NLI.")
                 continue
 
             # Calculer la matrice NLI (chaque phrase vs chaque hypothèse)

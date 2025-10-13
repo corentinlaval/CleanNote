@@ -94,7 +94,8 @@ class Pipeline:
 
         df = self.dataset_h.data
         print(f"[Pipeline] Processing {len(df)} rows...")
-        print(df.head(2))
+        print(df.head(4))
+        print(list(df.columns))
         text_col = self.dataset.field
         out_h_col = f"{self.dataset.field}__h"
 

@@ -165,8 +165,14 @@ class Pipeline:
                 self._nlp = spacy.load("en_core_web_sm")
             except OSError:
                 self._nlp = spacy.blank("en")
-                if "sentencizer" not in self._nlp.pipe_names:
-                    self._nlp.add_pipe("sentencizer")
+            # (ré)ajoute un sentencizer explicite avec coupure sur \n
+            if "sentencizer" in self._nlp.pipe_names:
+                self._nlp.remove_pipe("sentencizer")
+            self._nlp.add_pipe(
+                "sentencizer",
+                config={"punct_chars": [".", "!", "?"], "newline_boundaries": True},
+                first=True,  # avant le parser pour fixer les limites
+            )
 
     def nli(self, premise: str, hypothesis: str, return_probs: bool = True) -> Dict:
         self._ensure_nli()
@@ -204,8 +210,23 @@ class Pipeline:
 
     def decouper_texte_en_phrases(self, texte: str) -> List[str]:
         self._ensure_nlp()
-        doc = self._nlp(texte or "")
+        txt = self._normalize_for_sentences(texte or "")
+        doc = self._nlp(txt)
         return [s.text.strip() for s in doc.sents if s.text.strip()]
+
+    import re
+
+    def _normalize_for_sentences(self, texte: str) -> str:
+        if not texte:
+            return ""
+        t = texte
+        # 1) unifier les fins de ligne et déséchapper les "\n" littéraux
+        t = t.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+        # 2) compacter les multiples \n
+        t = re.sub(r"\n{2,}", "\n", t)
+        # 3) si une ligne se termine sans ponctuation forte, on insère un point avant le saut de ligne
+        t = re.sub(r"(?<![.!?])\n", ".\n", t)
+        return t.strip()
 
     # ------------------------- NLI model load -------------------------
 

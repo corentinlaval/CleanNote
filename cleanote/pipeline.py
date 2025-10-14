@@ -238,6 +238,68 @@ class Pipeline:
 
         print("[Pipeline] UMLS verification completed.")
 
+    def verify_NLI(self):
+        print("[Pipeline] Starting NLI verification...")
+        self._ensure_nli()
+
+        df = self.dataset_h.data
+        text_col = self.dataset.field
+        out_h_col = f"{self.dataset.field}__h"
+
+        # Colonnes résultats
+        for col in ("nli_ent_mean", "nli_neu_mean", "nli_con_mean"):
+            if col not in df.columns:
+                df[col] = np.nan
+
+        for idx, row in df.iterrows():
+            # Texte source (comme src_sents dans Colab)
+            src_text = (row.get(text_col) or "").strip()
+
+            # Résumé/hypothèses (comme sum_sents dans Colab)
+            summ_text = (row.get("Summary") or "").strip()
+            if not summ_text and out_h_col in df.columns:
+                try:
+                    payload = row[out_h_col]
+                    payload = (
+                        json.loads(payload)
+                        if isinstance(payload, str)
+                        else (payload or {})
+                    )
+                    summ_text = (payload or {}).get("Summary", "") or ""
+                except Exception:
+                    pass
+            summ_text = summ_text.strip()
+
+            if not src_text or not summ_text:
+                print(f"[Pipeline] Row {idx}: texte ou résumé vide, skip.")
+                continue
+
+            premises = self.decouper_texte_en_phrases(src_text)  # source
+            hypotheses = self.decouper_texte_en_phrases(summ_text)  # résumé
+
+            if not premises or not hypotheses:
+                print(f"[Pipeline] Row {idx}: pas de phrases, skip.")
+                continue
+
+            # Comme Colab: lignes = résumé, colonnes = source; nli(premise=src, hypothesis=sum)
+            matrice = self.generer_table(
+                hypotheses,
+                premises,
+                lambda h, p: self.nli(p, h, return_probs=True),
+            )
+
+            avg = self.average(hypotheses, premises, matrice)
+
+            df.at[idx, "nli_ent_mean"] = avg["entailment"]
+            df.at[idx, "nli_neu_mean"] = avg["neutral"]
+            df.at[idx, "nli_con_mean"] = avg["contradiction"]
+
+            print(
+                f"[Pipeline] Row {idx} → entail={avg['entailment']}, neutral={avg['neutral']}, contra={avg['contradiction']}"
+            )
+
+        print("[Pipeline] NLI verification completed.")
+
     # _ensure_nlp : sans newline_boundaries
     def _ensure_nlp(self):
         if self._nlp is None:

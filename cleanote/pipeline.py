@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 import warnings
 import json
+import re
+
 
 logger = logging.getLogger(__name__)
 
@@ -159,19 +161,19 @@ class Pipeline:
 
         print("[Pipeline] NLI verification completed.")
 
+    # _ensure_nlp : sans newline_boundaries
     def _ensure_nlp(self):
         if self._nlp is None:
             try:
                 self._nlp = spacy.load("en_core_web_sm")
             except OSError:
                 self._nlp = spacy.blank("en")
-            # (ré)ajoute un sentencizer explicite avec coupure sur \n
             if "sentencizer" in self._nlp.pipe_names:
                 self._nlp.remove_pipe("sentencizer")
             self._nlp.add_pipe(
                 "sentencizer",
-                config={"punct_chars": [".", "!", "?"], "newline_boundaries": True},
-                first=True,  # avant le parser pour fixer les limites
+                config={"punct_chars": [".", "!", "?"]},
+                first=True,
             )
 
     def nli(self, premise: str, hypothesis: str, return_probs: bool = True) -> Dict:
@@ -214,19 +216,18 @@ class Pipeline:
         doc = self._nlp(txt)
         return [s.text.strip() for s in doc.sents if s.text.strip()]
 
-    import re
-
+    # normalisation des sauts de ligne (remplace ta version)
     def _normalize_for_sentences(self, texte: str) -> str:
         if not texte:
             return ""
-        t = texte
-        # 1) unifier les fins de ligne et déséchapper les "\n" littéraux
-        t = t.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
-        # 2) compacter les multiples \n
-        t = re.sub(r"\n{2,}", "\n", t)
-        # 3) si une ligne se termine sans ponctuation forte, on insère un point avant le saut de ligne
-        t = re.sub(r"(?<![.!?])\n", ".\n", t)
-        return t.strip()
+        t = texte.replace("\r\n", "\n").replace("\r", "\n").replace("\\n", "\n")
+        # ponctuation + \n -> ponctuation + espace
+        t = re.sub(r"([.!?])\s*\n\s*", r"\1 ", t)
+        # \n sans ponctuation avant -> point + espace
+        t = re.sub(r"(?<![.!?])\s*\n\s*", ". ", t)
+        # espaces multiples -> 1
+        t = re.sub(r"\s{2,}", " ", t).strip()
+        return t
 
     # ------------------------- NLI model load -------------------------
 

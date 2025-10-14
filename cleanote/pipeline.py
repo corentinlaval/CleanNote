@@ -1,6 +1,8 @@
 import logging
 from typing import Iterable, Callable, Dict, List, Optional, Any
 
+import math
+import matplotlib.pyplot as plt
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import spacy
@@ -485,6 +487,106 @@ class Pipeline:
         return self._tok, self._clf, self._id2label
 
     # ------------------------- Tableaux & métriques -------------------------
+    def _row_metrics_dict(self, row) -> Dict[str, Optional[float]]:
+        """Récupère proprement les métriques d'une ligne, en gardant None si absentes."""
+
+        def g(col):
+            return row[col] if col in row and pd.notna(row[col]) else None
+
+        return {
+            # NLI
+            "NLI – entailment": g("nli_ent_mean"),
+            "NLI – neutral": g("nli_neu_mean"),
+            "NLI – contradiction": g("nli_con_mean"),
+            # UMLS (résumé vs source)
+            "UMLS – match rate (SUM∩SRC / SUM)": g("umls_match_rate"),
+            "UMLS – loss rate (SRC−SUM / SRC)": g("umls_loss_rate"),
+            "UMLS – creation rate (SUM−SRC / SUM)": g("umls_creation_rate"),
+            "UMLS – Jaccard": g("umls_jaccard"),
+            # UMLS par colonne (facultatif ; commente si tu veux moins de barres)
+            "Symptoms – match rate": g("symptoms_umls_match_rate"),
+            "Symptoms – loss rate": g("symptoms_umls_loss_rate"),
+            "MedConclusion – match rate": g("medicalconclusion_umls_match_rate"),
+            "MedConclusion – loss rate": g("medicalconclusion_umls_loss_rate"),
+            "Treatments – match rate": g("treatments_umls_match_rate"),
+            "Treatments – loss rate": g("treatments_umls_loss_rate"),
+        }
+
+    def save_row_stats_image(self, idx: int, path: Optional[str] = None) -> str:
+        """
+        Sauve un graphique PNG des métriques (NLI + UMLS) pour la ligne `idx`.
+        Retourne le chemin du fichier généré.
+        """
+        df = self.dataset_h.data
+        if idx < 0 or idx >= len(df):
+            raise IndexError(f"idx {idx} hors limites (0..{len(df)-1})")
+
+        row = df.iloc[idx]
+        metrics = self._row_metrics_dict(row)
+
+        # Prépare données (on garde l'ordre du dict)
+        labels = list(metrics.keys())
+        values = [metrics[k] for k in labels]
+
+        # Filtre les métriques totalement absentes (None)
+        filtered = [(lab, val) for lab, val in zip(labels, values) if val is not None]
+        if not filtered:
+            raise ValueError("Aucune métrique disponible pour cette ligne.")
+
+        labels, values = zip(*filtered)
+        # clip [0,1] si besoin
+        values = [max(0.0, min(1.0, float(v))) for v in values]
+
+        # Chemin
+        if path is None:
+            path = f"row_{idx}_stats.png"
+
+        # --- Matplotlib : un seul plot, pas de style/couleurs spécifiques (consignes) ---
+        plt.figure(figsize=(10, max(4, 0.4 * len(labels))))  # hauteur auto
+        y_pos = range(len(labels))
+        plt.barh(y_pos, values)  # pas de couleur spécifique
+        plt.yticks(y_pos, labels)
+        plt.xlim(0, 1)
+        plt.xlabel("Score [0–1]")
+        title_left = row.get(self.dataset.field, "")
+        title_left = (
+            (title_left[:80] + "…")
+            if isinstance(title_left, str) and len(title_left) > 80
+            else title_left
+        )
+        plt.title(f"Stats – ligne {idx} | {title_left}")
+
+        # annotations sur les barres
+        for y, v in enumerate(values):
+            plt.text(
+                v + 0.01 if v <= 0.9 else v - 0.15,
+                y,
+                f"{v:.3f}",
+                va="center",
+                ha="left" if v <= 0.9 else "right",
+            )
+
+        plt.tight_layout()
+        plt.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close()
+        return path
+
+    def save_all_stats_images(self, limit: Optional[int] = None) -> List[str]:
+        """
+        Génère un PNG par ligne. `limit` permet de borner le nombre d'images.
+        Retourne la liste des chemins générés.
+        """
+        n = len(self.dataset_h.data)
+        if limit is not None:
+            n = min(n, int(limit))
+        paths = []
+        for i in range(n):
+            try:
+                p = self.save_row_stats_image(i)
+                paths.append(p)
+            except Exception as e:
+                print(f"[stats-img] ligne {i} ignorée ({e})")
+        return paths
 
     def generer_table(
         self,

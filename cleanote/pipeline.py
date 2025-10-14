@@ -43,6 +43,7 @@ class Pipeline:
         self.UMLS_MIN_SCORE = 0.0
         self._sci = None
         self._umls_cache = {}
+        self._umls_doc_cache = {}
 
     # ------------------------- Orchestration -------------------------
 
@@ -51,6 +52,7 @@ class Pipeline:
         self.homogenize()
         self.verify_QuickUMLS()
         self.verify_NLI()
+        self.verify_UMLS_summary_vs_source()
         print("[Pipeline] Pipeline completed.")
         return self.dataset_h
 
@@ -348,6 +350,105 @@ class Pipeline:
         }
 
     # ------------------------- spaCy utils -------------------------
+
+    def _get_summary_text(self, row, out_h_col: str) -> str:
+        summ_text = (row.get("Summary") or "").strip()
+        if not summ_text and out_h_col in row:
+            payload = row.get(out_h_col)
+            try:
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                if isinstance(payload, dict):
+                    summ_text = (payload.get("Summary") or "").strip()
+            except Exception:
+                pass
+        return summ_text
+
+    def _umls_cuis_from_text(self, text: str) -> set:
+        """Retourne l'ensemble des CUIs UMLS détectés dans un texte (via scispacy_linker), avec cache."""
+        self._ensure_scispacy()
+        key = self._norm_term(text)
+        if key in self._umls_doc_cache:
+            return self._umls_doc_cache[key]
+
+        cuis = set()
+        if text and text.strip():
+            doc = self._sci(text)
+            for ent in doc.ents:
+                kb = getattr(ent._, "kb_ents", [])
+                if kb:
+                    # garde les CUIs dont le score passe le seuil
+                    for cui, score in kb:
+                        if score >= float(self.UMLS_MIN_SCORE):
+                            cuis.add(cui)
+                            # on peut break si on ne veut que le meilleur ; ici on garde tous >= seuil
+        self._umls_doc_cache[key] = cuis
+        return cuis
+
+    def verify_UMLS_summary_vs_source(self):
+        """
+        Compare les entités UMLS (CUIs) du résumé vs la note complète.
+        Colonnes créées :
+        umls_src_total, umls_sum_total, umls_overlap_count,
+        umls_match_rate, umls_loss_rate, umls_creation_rate, umls_jaccard
+        """
+        print("[Pipeline] Starting UMLS Summary vs Source verification...")
+        self._ensure_scispacy()
+
+        df = self.dataset_h.data
+        text_col = self.dataset.field
+        out_h_col = f"{self.dataset.field}__h"
+
+        # Crée les colonnes si absentes
+        new_cols = [
+            "umls_src_total",
+            "umls_sum_total",
+            "umls_overlap_count",
+            "umls_match_rate",
+            "umls_loss_rate",
+            "umls_creation_rate",
+            "umls_jaccard",
+        ]
+        for c in new_cols:
+            if c not in df.columns:
+                df[c] = np.nan
+
+        for idx, row in df.iterrows():
+            src_text = (row.get(text_col) or "").strip()
+            sum_text = self._get_summary_text(row, out_h_col)
+
+            # CUIs
+            src_cuis = self._umls_cuis_from_text(src_text)
+            sum_cuis = self._umls_cuis_from_text(sum_text)
+
+            src_total = len(src_cuis)
+            sum_total = len(sum_cuis)
+            overlap = len(src_cuis & sum_cuis)
+
+            # Rates (NaN si denom == 0)
+            match_rate = (overlap / sum_total) if sum_total > 0 else np.nan
+            loss_rate = ((src_total - overlap) / src_total) if src_total > 0 else np.nan
+            creation_rate = (
+                ((sum_total - overlap) / sum_total) if sum_total > 0 else np.nan
+            )
+
+            # Jaccard (optionnel, utile pour un score global de similarité)
+            denom = len(src_cuis | sum_cuis)
+            jaccard = (overlap / denom) if denom > 0 else np.nan
+
+            # Écriture
+            df.at[idx, "umls_src_total"] = src_total
+            df.at[idx, "umls_sum_total"] = sum_total
+            df.at[idx, "umls_overlap_count"] = overlap
+            df.at[idx, "umls_match_rate"] = match_rate
+            df.at[idx, "umls_loss_rate"] = loss_rate
+            df.at[idx, "umls_creation_rate"] = creation_rate
+            df.at[idx, "umls_jaccard"] = jaccard
+
+            if (idx + 1) % 10 == 0:
+                print(f"[UMLS SxS] processed {idx+1}/{len(df)} rows...")
+
+        print("[Pipeline] UMLS Summary vs Source verification completed.")
 
     def decouper_texte_en_phrases(self, texte: str) -> List[str]:
         self._ensure_nlp()

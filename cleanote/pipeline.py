@@ -39,6 +39,11 @@ class Pipeline:
         self._clf = None  # HF sequence classification model
         self._id2label: Optional[Dict[int, str]] = None
 
+        self.SCI_MODEL_NAME = "en_core_sci_lg"  # ou "en_core_sci_sm"
+        self.UMLS_MIN_SCORE = 0.0
+        self._sci = None
+        self._umls_cache = {}
+
     # ------------------------- Orchestration -------------------------
 
     def apply(self):
@@ -83,83 +88,155 @@ class Pipeline:
 
     # ------------------------- Vérifications -------------------------
 
+    def _ensure_scispacy(self):
+        if self._sci is not None:
+            return self._sci
+
+        try:
+            import scispacy  # noqa: F401
+            from scispacy.umls_linking import UmlsEntityLinker
+        except Exception as e:
+            raise RuntimeError(
+                "SciSpaCy n'est pas installé (pip install scispacy)."
+            ) from e
+
+        # charge le modèle (lg -> fallback sm)
+        try:
+            self._sci = spacy.load(self.SCI_MODEL_NAME)
+        except OSError:
+            try:
+                self._sci = spacy.load("en_core_sci_sm")
+                print("[UMLS] Fallback → en_core_sci_sm (lg non installé)")
+            except OSError as e:
+                raise RuntimeError(
+                    "Aucun modèle SciSpaCy trouvé. Installe en_core_sci_lg ou en_core_sci_sm."
+                ) from e
+
+        # ajoute le linker UMLS
+        if "scispacy_linker" in self._sci.pipe_names:
+            self._sci.remove_pipe("scispacy_linker")
+        self._sci.add_pipe(
+            "scispacy_linker",
+            config={
+                "resolve_abbreviations": True,
+                "k": 30,
+                "threshold": float(self.UMLS_MIN_SCORE),
+            },
+            last=True,
+        )
+        return self._sci
+
+    def _norm_term(self, t: str) -> str:
+        return re.sub(r"\s+", " ", (t or "").strip().lower())
+
+    def _umls_match_bulk(self, terms: List[str]) -> Dict[str, bool]:
+        """Retourne {terme_original -> True/False} selon présence d'au moins un CUI (score >= seuil)."""
+        self._ensure_scispacy()
+        # normalise + uniques
+        mapping = {t: self._norm_term(t) for t in terms}
+        uniq_norm = sorted(set(v for v in mapping.values() if v))
+        to_run = [u for u in uniq_norm if u not in self._umls_cache]
+
+        if to_run:
+            docs = self._sci.pipe(to_run, batch_size=64, n_process=1)
+            for key, doc in zip(to_run, docs):
+                ok = False
+                for ent in doc.ents:
+                    kb = getattr(ent._, "kb_ents", [])
+                    if kb:
+                        best = max(score for _, score in kb)
+                        if best >= float(self.UMLS_MIN_SCORE):
+                            ok = True
+                            break
+                self._umls_cache[key] = ok
+
+        # re-projette sur les termes d'origine
+        return {t: self._umls_cache.get(mapping[t], False) for t in terms}
+
+    def _extract_entity_list(self, row, field_name: str, out_h_col: str) -> List[str]:
+        """
+        Récupère la liste d'entités pour field_name ('Symptoms'/'MedicalConclusion'/'Treatments').
+        Essaie d'abord la colonne directe; sinon parse le JSON dans out_h_col.
+        """
+        vals = row.get(field_name)
+        # déjà une liste ?
+        if isinstance(vals, list):
+            return [str(x).strip() for x in vals if str(x).strip()]
+        # string: tente JSON, sinon split simple
+        if isinstance(vals, str) and vals.strip():
+            try:
+                parsed = json.loads(vals)
+                if isinstance(parsed, list):
+                    return [str(x).strip() for x in parsed if str(x).strip()]
+            except Exception:
+                parts = re.split(r"[;,]\s*", vals.strip())
+                return [p for p in parts if p]
+        # fallback: JSON homogénéisé
+        payload = row.get(out_h_col)
+        try:
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            if isinstance(payload, dict):
+                arr = payload.get(field_name, [])
+                if isinstance(arr, list):
+                    return [str(x).strip() for x in arr if str(x).strip()]
+        except Exception:
+            pass
+        return []
+
     def verify_QuickUMLS(self):
-        # Placeholder: branchement futur à QuickUMLS
-        print("[Pipeline] Starting QuickUMLS verification...")
-        df = self.dataset_h.data
-        print(f"[Pipeline] Processing {len(df)} rows...")
-        print(df.head(4))
-        print(list(df.columns))
-        print("[Pipeline] QuickUMLS verification completed.")
-
-    def verify_NLI(self):
-        print("[Pipeline] Starting NLI verification...")
-        self._ensure_nli()
+        """
+        Vérification via SciSpaCy + UMLS linker.
+        Pour chaque colonne (Symptoms, MedicalConclusion, Treatments), ajoute:
+        *_umls_total, *_umls_matched, *_umls_match_rate, *_umls_loss_rate
+        """
+        print("[Pipeline] Starting UMLS verification (SciSpaCy linker)...")
+        self._ensure_scispacy()
 
         df = self.dataset_h.data
-        text_col = self.dataset.field
         out_h_col = f"{self.dataset.field}__h"
+        triplets = [
+            ("Symptoms", "symptoms"),
+            ("MedicalConclusion", "medicalconclusion"),
+            ("Treatments", "treatments"),
+        ]
 
-        # Colonnes résultats
-        for col in ("nli_ent_mean", "nli_neu_mean", "nli_con_mean"):
-            if col not in df.columns:
-                df[col] = np.nan
+        # crée colonnes résultat si absentes
+        for _, short in triplets:
+            for suffix in (
+                "umls_total",
+                "umls_matched",
+                "umls_match_rate",
+                "umls_loss_rate",
+            ):
+                col = f"{short}_{suffix}"
+                if col not in df.columns:
+                    df[col] = np.nan
 
         for idx, row in df.iterrows():
-            # 1) Texte source (comme src_sents dans Colab)
-            src_text = (row.get(text_col) or "").strip()
+            for field, short in triplets:
+                entities = self._extract_entity_list(row, field, out_h_col)
+                total = len(entities)
 
-            # 2) Résumé/hypothèses (comme sum_sents dans Colab)
-            summ_text = (row.get("Summary") or "").strip()
-            if not summ_text and out_h_col in df.columns:
-                try:
-                    payload = row[out_h_col]
-                    payload = (
-                        json.loads(payload)
-                        if isinstance(payload, str)
-                        else (payload or {})
-                    )
-                    summ_text = (payload or {}).get("Summary", "") or ""
-                except Exception:
-                    pass
-            summ_text = summ_text.strip()
+                if total == 0:
+                    matched = 0
+                    match_rate = np.nan
+                    loss_rate = np.nan
+                else:
+                    status = self._umls_match_bulk(entities)  # {term: bool}
+                    matched = sum(1 for t in entities if status.get(t, False))
+                    match_rate = matched / total
+                    loss_rate = 1.0 - match_rate
 
-            if not src_text or not summ_text:
-                print(f"[Pipeline] Row {idx}: texte ou résumé vide, skip.")
-                continue
+                df.at[idx, f"{short}_umls_total"] = total
+                df.at[idx, f"{short}_umls_matched"] = matched
+                df.at[idx, f"{short}_umls_match_rate"] = match_rate
+                df.at[idx, f"{short}_umls_loss_rate"] = loss_rate
 
-            premises = self.decouper_texte_en_phrases(src_text)  # source
-            print(f"[Pipeline] Row {idx}: {len(premises)} premises.")
-            print(premises)
-            hypotheses = self.decouper_texte_en_phrases(summ_text)  # résumé
-            print(f"[Pipeline] Row {idx}: {len(hypotheses)} hypotheses.")
-            print(hypotheses)
+            if (idx + 1) % 10 == 0:
+                print(f"[UMLS] processed {idx+1}/{len(df)} rows...")
 
-            if not premises or not hypotheses:
-                print(f"[Pipeline] Row {idx}: pas de phrases, skip.")
-                continue
-
-            # >>> ALIGNÉ COLAB <<<
-            # Colab: matrice = generer_table(sum_sents, src_sents, nli)
-            # Donc chaque cellule = nli(premise=src, hypothesis=sum)
-            matrice = self.generer_table(
-                hypotheses,  # lignes = résumé
-                premises,  # colonnes = source
-                lambda h, p: self.nli(p, h, return_probs=True),
-            )
-
-            # Moyenne "best source per hypothesis" exactement comme Colab
-            avg = self.average(hypotheses, premises, matrice)
-
-            df.at[idx, "nli_ent_mean"] = avg["entailment"]
-            df.at[idx, "nli_neu_mean"] = avg["neutral"]
-            df.at[idx, "nli_con_mean"] = avg["contradiction"]
-
-            print(
-                f"[Pipeline] Row {idx} → entail={avg['entailment']}, neutral={avg['neutral']}, contra={avg['contradiction']}"
-            )
-
-        print("[Pipeline] NLI verification completed.")
+        print("[Pipeline] UMLS verification completed.")
 
     # _ensure_nlp : sans newline_boundaries
     def _ensure_nlp(self):

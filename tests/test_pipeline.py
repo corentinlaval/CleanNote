@@ -260,7 +260,7 @@ def test_save_all_stats_images_limit_and_skip(pipe_obj, tmp_path, monkeypatch):
     p = pipe_obj
     p.homogenize()
 
-    def fake_save(self, i, path=None):   # <-- IMPORTANT: ajouter self
+    def fake_save(self, i, path=None):  # <-- IMPORTANT: ajouter self
         if i == 0:
             pth = path or f"row_{i}_stats.png"
             with open(pth, "wb") as f:

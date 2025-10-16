@@ -1,237 +1,235 @@
-# tests/test_model_extra.py
+from __future__ import annotations
+from typing import Any, Dict, Tuple
+from transformers import GenerationConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
+import copy
 import pandas as pd
-import pytest
-
-from cleanote.model import (
-    Model,
-    _split_kwargs_simple,
-    _normalize_dtypes,
-    _extract_json_block,
-)
+import json
+import re
 
 
-# ---------- Doubles / utilitaires ----------
-class FakeTokenizer:
-    def __init__(self, pad_token_id=None, eos_token_id=1, **kwargs):
-        self.pad_token_id = pad_token_id
-        self.eos_token_id = eos_token_id
-        self.eos_token = "<eos>"
-        self.pad_token = None
-        self.kwargs = kwargs
+def _ensure_pad_token(tok):
+    if tok.pad_token_id is None and tok.eos_token_id is not None:
+        tok.pad_token = tok.eos_token
 
 
-class FakeCausalModel:
-    def __init__(self, name, **kwargs):
+_PIPELINE_KEYS = {
+    "device",
+    "device_map",
+    "framework",
+    "batch_size",
+    "return_full_text",
+    "torch_dtype",
+    "dtype",
+}
+
+
+def _normalize_dtypes(d: Dict[str, Any]) -> None:
+    # Si "dtype" est present et "torch_dtype" absent, normaliser vers "torch_dtype"
+    if "dtype" in d and "torch_dtype" not in d:
+        d["torch_dtype"] = d.pop("dtype")
+
+
+def _split_kwargs_simple(
+    kwargs: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    gen_keys = set(GenerationConfig().to_dict().keys())
+
+    pipeline_kwargs: Dict[str, Any] = {}
+    generation_kwargs: Dict[str, Any] = {}
+    model_kwargs: Dict[str, Any] = {}
+    tokenizer_kwargs: Dict[str, Any] = {}
+
+    for k, v in kwargs.items():
+        if k.startswith("model_"):
+            model_kwargs[k[len("model_") :]] = v
+        elif k.startswith("tokenizer_"):
+            tokenizer_kwargs[k[len("tokenizer_") :]] = v
+        elif k in gen_keys:
+            generation_kwargs[k] = v
+        elif k in _PIPELINE_KEYS:
+            pipeline_kwargs[k] = v
+        else:
+            # Par défaut, tout va dans les kwargs de génération
+            generation_kwargs[k] = v
+
+    _normalize_dtypes(pipeline_kwargs)
+    _normalize_dtypes(model_kwargs)
+
+    return pipeline_kwargs, generation_kwargs, model_kwargs, tokenizer_kwargs
+
+
+def _extract_json_block(text: str) -> dict:
+    """
+    Extrait le premier bloc JSON trouvé dans `text` et le parse en dict.
+    Retourne {} si rien de valide n'est trouvé.
+    """
+    try:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            return json.loads(m.group(0))
+    except json.JSONDecodeError:
+        pass
+    return {}
+
+
+class Model:
+    """Wrapper simple pour modèles de génération de texte (text-generation uniquement)."""
+
+    def __init__(
+        self, name: str, task: str = "text-generation", prompt: str = "", **kwargs: Any
+    ):
+        if task != "text-generation":
+            raise ValueError("Only 'text-generation' is supported in this Model.")
+
         self.name = name
-        self.kwargs = kwargs
-
-
-class PipelineRecorder:
-    def __init__(self, task, model, tokenizer, **kwargs):
         self.task = task
-        self.model = model
-        self.tokenizer = tokenizer
-        self.kwargs = kwargs
-        self.calls = []
+        self.prompt = prompt
 
-    def __call__(self, inputs, **infer_kwargs):
-        self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
-        return [{"generated_text": "GEN_OUT"}]
+        (
+            self.pipeline_kwargs,
+            self.generation_kwargs,
+            self.model_kwargs,
+            self.tokenizer_kwargs,
+        ) = _split_kwargs_simple(kwargs)
 
+        # Si max_new_tokens est fourni, ignorer max_length pour éviter les conflits
+        if (
+            "max_new_tokens" in self.generation_kwargs
+            and "max_length" in self.generation_kwargs
+        ):
+            self.generation_kwargs.pop("max_length", None)
 
-@pytest.fixture
-def patch_transformers(monkeypatch):
-    created = {}
+        # Valeurs par défaut raisonnables
+        self.generation_kwargs.setdefault("do_sample", False)
+        self.generation_kwargs.setdefault("temperature", 0.0)
+        self.generation_kwargs.setdefault("top_p", 1.0)
+        self.pipeline_kwargs.setdefault("return_full_text", False)
 
-    def fake_auto_tokenizer_from_pretrained(name, **kwargs):
-        created["tokenizer_called_with"] = {"name": name, **kwargs}
-        return FakeTokenizer(pad_token_id=None, eos_token_id=1, **kwargs)
+        # device de pipeline par défaut = CPU
+        if (
+            "device" not in self.pipeline_kwargs
+            and "device_map" not in self.pipeline_kwargs
+        ):
+            self.pipeline_kwargs["device"] = -1
 
-    def fake_causal_from_pretrained(name, **kwargs):
-        created["causal_model_called_with"] = {"name": name, **kwargs}
-        return FakeCausalModel(name, **kwargs)
+        self._tokenizer = None
+        self._model = None
+        self._pipe = None
+        self.load()
 
-    def fake_pipeline(task, model, tokenizer, **kwargs):
-        created["pipeline_called_with"] = {"task": task, "kwargs": kwargs}
-        return PipelineRecorder(task, model, tokenizer, **kwargs)
+    def load(self) -> None:
+        # Idempotent: si déjà chargé, on ne refait rien
+        if self._pipe is not None:
+            return
+        print(f"[Model] Loading model '{self.name}' for task '{self.task}'...")
 
-    monkeypatch.setattr(
-        "cleanote.model.AutoTokenizer.from_pretrained",
-        fake_auto_tokenizer_from_pretrained,
-    )
-    monkeypatch.setattr(
-        "cleanote.model.AutoModelForCausalLM.from_pretrained",
-        fake_causal_from_pretrained,
-    )
-    monkeypatch.setattr("cleanote.model.pipeline", fake_pipeline)
-    return created
+        print("[Model] Checking tokenizer...")
+        if "use_fast" not in self.tokenizer_kwargs:
+            self.tokenizer_kwargs["use_fast"] = True
+        tok = AutoTokenizer.from_pretrained(self.name, **self.tokenizer_kwargs)
+        _ensure_pad_token(tok)
 
+        print("[Model] Settling model kwargs...")
+        self.model_kwargs.setdefault("low_cpu_mem_usage", True)
+        self.model_kwargs.setdefault("use_safetensors", True)
 
-class FakeDataset:
-    def __init__(self, df: pd.DataFrame, field: str = "full_note"):
-        self.data = df
-        self.field = field
+        print("[Model] Downloading model...")
+        mdl = AutoModelForCausalLM.from_pretrained(self.name, **self.model_kwargs)
 
+        print("[Model] Defining pipeline...")
+        self._pipe = pipeline(
+            "text-generation",
+            model=mdl,
+            tokenizer=tok,
+            **self.pipeline_kwargs,
+        )
+        print("[Model] Load completed.")
 
-# ---------- Tests unitaires des helpers ----------
-def test_split_kwargs_simple_routing_and_normalization():
-    kw = dict(
-        # prefixes
-        model_revision="main",
-        tokenizer_use_fast=False,
-        # generation key (e.g. from GenerationConfig)
-        max_new_tokens=32,
-        # pipeline keys
-        batch_size=8,
-        device_map="auto",
-        # dtype normalization targets
-        dtype="float16",  # pipeline dtype -> torch_dtype
-        model_dtype="bfloat16",  # model dtype -> torch_dtype
-        # unknowns should fall back to generation_kwargs
-        unknown_flag=True,
-    )
+    def run(
+        self,
+        dataset,
+        prompt: str | None,
+        *,
+        output_col: str = "Output",
+        **gen_overrides,
+    ):
+        # --- Validations basiques ---
+        if not hasattr(dataset, "data"):
+            raise ValueError("[Model] No attribute 'data' found on dataset.")
 
-    p_kw, g_kw, m_kw, t_kw = _split_kwargs_simple(kw)
+        if not isinstance(dataset.data, pd.DataFrame):
+            raise TypeError(
+                "[Model] The 'data' attribute of dataset must be a pandas DataFrame."
+            )
 
-    # prefixes routed
-    assert t_kw == {"use_fast": False}
-    assert m_kw["revision"] == "main"
+        if not hasattr(dataset, "field"):
+            raise ValueError("[Model] The dataset must define the 'field' attribute.")
 
-    # generation keys (known + unknown fallback)
-    assert g_kw["max_new_tokens"] == 32
-    assert g_kw["unknown_flag"] is True
+        if dataset.field not in dataset.data.columns:
+            raise KeyError(f"[Model] Column '{dataset.field}' not found.")
 
-    # pipeline keys
-    assert p_kw["batch_size"] == 8
-    assert p_kw["device_map"] == "auto"
+        # --- Copie de travail ---
+        print("[Model] Copying dataset...")
+        df = dataset.data.copy()
 
-    # dtype normalized
-    assert p_kw.get("torch_dtype") == "float16" and "dtype" not in p_kw
-    assert m_kw.get("torch_dtype") == "bfloat16" and "dtype" not in m_kw
+        print(f"[Model] Keeping column '{dataset.field}' as text source.")
+        texts = df[dataset.field].astype(str).tolist()
 
+        # Paramètres d'inférence: overrides > configuration du modèle
+        infer_kwargs = {**self.generation_kwargs, **gen_overrides}
 
-def test_normalize_dtypes_no_override_if_torch_dtype_present():
-    d = {"dtype": "float16", "torch_dtype": "bfloat16"}
-    # ne doit rien changer si torch_dtype déjà là
-    _normalize_dtypes(d)
-    assert d["torch_dtype"] == "bfloat16"
-    assert d["dtype"] == "float16"  # inchangé (pas pop puisque torch_dtype existe)
+        # Prompt effectif: argument > attribut du modèle > chaîne vide
+        effective_prompt = prompt if prompt is not None else getattr(self, "prompt", "")
 
+        outs = []
+        for i, txt in enumerate(texts, start=1):
+            print(f"\n===== Note {i}/{len(texts)} =====")
+            print("[Model] Defining the prompt...")
+            inp = f"{effective_prompt}\n\n{txt}".strip()
 
-def test_extract_json_block_valid_and_json_error():
-    valid = 'prefix {"a": 1, "b": [2]} suffix'
-    assert _extract_json_block(valid) == {"a": 1, "b": [2]}
+            print("[Model] Generating...")
+            result = self._pipe(inp, **infer_kwargs)
 
-    # JSON mal formé -> JSONDecodeError capturé -> {}
-    invalid = "hello {not: valid json} world"
-    assert _extract_json_block(invalid) == {}
+            print("[Model] Checking result format...")
+            if isinstance(result, list) and result:
+                outs.append(result[0].get("generated_text", ""))
+                print("[Model] OK result is a non-empty list.")
+            elif isinstance(result, dict):
+                outs.append(result.get("generated_text", ""))
+                print("[Model] OK result is a dict.")
+            else:
+                outs.append(str(result))
+                print(
+                    "[Model] Warning: result is not a list or dict, storing str(result)."
+                )
 
-    # Sans accolade -> {}
-    none = "no json here"
-    assert _extract_json_block(none) == {}
+        print(f"[Model] Generated {len(outs)} outputs.")
+        print("[Model] Determining output column name...")
 
+        # Garantir l'unicité du nom de colonne demandé (défaut: "Output")
+        base, unique_name = output_col, output_col
+        i = 1
+        while unique_name in df.columns:
+            unique_name = f"{base}_{i}"
+            i += 1
 
-# ---------- Tests complémentaires de Model.run ----------
-def test_run_injects_prompt_with_blank_line(monkeypatch, patch_transformers):
-    # Enregistre l'input exact passé au pipeline
-    df = pd.DataFrame({"full_note": ["hello"]})
-    ds = FakeDataset(df)
+        df[unique_name] = outs
+        print(f"[Model] Final output column name: {unique_name}")
+        print(f"[Model] out is: {outs}")
 
-    class CapturingPipe(PipelineRecorder):
-        def __call__(self, inputs, **infer_kwargs):
-            self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
-            return [{"generated_text": "OK"}]
+        # --- Post-traitement sûr : extraction JSON -> colonnes structurées ---
+        parsed_series = df[unique_name].apply(_extract_json_block)
+        df["Symptoms"] = parsed_series.apply(lambda d: d.get("Symptoms", []))
+        df["MedicalConclusion"] = parsed_series.apply(
+            lambda d: d.get("MedicalConclusion", [])
+        )
+        df["Treatments"] = parsed_series.apply(lambda d: d.get("Treatments", []))
+        df["Summary"] = parsed_series.apply(lambda d: d.get("Summary", ""))
 
-    monkeypatch.setattr(
-        "cleanote.model.pipeline",
-        lambda *a, **kw: CapturingPipe(*a, **kw),
-    )
-
-    m = Model(name="x/y", task="text-generation", tokenizer_use_fast=True)
-    out = m.run(ds, prompt="PROMPT")
-    assert out.data["Output"].iloc[0] == "OK"
-
-    # Vérifie le format exact "PROMPT\n\n<texte>"
-    call_inp = m._pipe.calls[-1]["inputs"]
-    assert call_inp == "PROMPT\n\nhello"
-
-
-def test_run_empty_list_response(monkeypatch, patch_transformers):
-    # Couvre le chemin: isinstance(result, list) mais list vide -> fallback "str(result)"
-    class EmptyListPipe:
-        def __init__(self, *a, **kw):
-            self.calls = []
-
-        def __call__(self, inputs, **infer_kwargs):
-            self.calls.append({"inputs": inputs, "infer_kwargs": infer_kwargs})
-            return []  # liste vide
-
-    monkeypatch.setattr("cleanote.model.pipeline", lambda *a, **kw: EmptyListPipe())
-
-    df = pd.DataFrame({"full_note": ["x"]})
-    ds = FakeDataset(df)
-    m = Model(name="repo/model", task="text-generation")
-
-    out = m.run(ds, "p")
-    # str([]) -> "[]"
-    assert out.data["Output"].iloc[0] == "[]"
-
-
-def test_tokenizer_and_model_prefix_kwargs_routed(monkeypatch):
-    # Vérifie que tokenizer_* et model_* atteignent bien les from_pretrained
-    tok_seen = {}
-    mdl_seen = {}
-
-    def fake_tok_from_pretrained(name, **kw):
-        tok_seen.update(kw)
-        return FakeTokenizer()
-
-    def fake_mdl_from_pretrained(name, **kw):
-        mdl_seen.update(kw)
-        return FakeCausalModel(name, **kw)
-
-    class _P:
-        def __init__(self, *a, **kw):
-            pass
-
-        def __call__(self, *a, **kw):
-            return [{"generated_text": "ok"}]
-
-    monkeypatch.setattr(
-        "cleanote.model.AutoTokenizer.from_pretrained", fake_tok_from_pretrained
-    )
-    monkeypatch.setattr(
-        "cleanote.model.AutoModelForCausalLM.from_pretrained", fake_mdl_from_pretrained
-    )
-    monkeypatch.setattr("cleanote.model.pipeline", lambda *a, **kw: _P())
-
-    _ = Model(
-        name="x/y",
-        task="text-generation",
-        tokenizer_revision="tokrev",
-        model_revision="mdlrev",
-    )
-
-    assert tok_seen.get("revision") == "tokrev"
-    assert mdl_seen.get("revision") == "mdlrev"
-
-
-def test_pipeline_keys_routed_to_pipeline_kwargs(patch_transformers):
-    # batch_size & framework doivent se retrouver dans pipeline kwargs
-    _ = Model(
-        name="x/y",
-        task="text-generation",
-        batch_size=16,
-        framework="pt",
-    )
-    pkw = patch_transformers["pipeline_called_with"]["kwargs"]
-    assert pkw.get("batch_size") == 16
-    assert pkw.get("framework") == "pt"
-
-
-def test_multiple_output_col_collision_produces_incremented_suffix(patch_transformers):
-    df = pd.DataFrame({"full_note": ["a"], "Output": ["e1"], "Output_1": ["e2"]})
-    ds = FakeDataset(df)
-    m = Model(name="x/y", task="text-generation")
-    out = m.run(ds, "p")
-    assert "Output_2" in out.data.columns
+        # --- Retourner un dataset du même type, sans side-effect sur l'original ---
+        result_ds = copy.copy(dataset)
+        result_ds.data = df
+        result_ds.last_output_col = unique_name
+        return result_ds

@@ -1,6 +1,5 @@
-# tests/test_pipeline_full.py
+# tests/test_pipeline_edges.py
 import json
-import math
 import os
 from types import SimpleNamespace
 
@@ -12,7 +11,7 @@ import torch
 from cleanote.pipeline import Pipeline
 
 
-# ----------------------------- Fakes utilitaires -----------------------------
+# ----------------------------- Fakes utilitaires (mêmes esprits que ton autre fichier) -----------------------------
 
 
 class FakeDataset:
@@ -22,32 +21,26 @@ class FakeDataset:
 
 
 class FakeModelH:
-    """Modèle d'homogénéisation minimal : enregistre les appels et renvoie un dataset cloné avec __h."""
-
-    def __init__(self, prompt=None):
+    def __init__(self, prompt=None, summary="S"):
         self.prompt = prompt
         self.calls = []
+        self.summary = summary
 
     def run(self, dataset, output_col="full_note__h", **_):
         self.calls.append({"dataset": dataset, "output_col": output_col})
         out = FakeDataset(dataset.data.copy(), dataset.field)
-        # Par défaut, on met un JSON valide dans la colonne __h
         payload = {
             "Symptoms": ["A"],
             "MedicalConclusion": ["C"],
             "Treatments": ["T"],
-            "Summary": "S",
+            "Summary": self.summary,  # paramétrable
         }
         out.data[output_col] = json.dumps(payload)
         return out
 
 
-# --- Fakes SciSpaCy / spaCy ---
-
-
 class FakeEnt:
     def __init__(self, kb_ents):
-        # On simule l'extension spaCy via un SimpleNamespace
         self._ = SimpleNamespace(kb_ents=kb_ents)
 
 
@@ -57,8 +50,6 @@ class FakeDoc:
 
 
 class FakeSciNLP:
-    """Assez pour ce qu'on utilise : .pipe() et __call__ pour _umls_cuis_from_text."""
-
     def __init__(self, term_to_ok=None, text_to_cuis=None):
         self._pipes = {}
         self._term_to_ok = term_to_ok or {}
@@ -83,13 +74,9 @@ class FakeSciNLP:
         return docs
 
     def __call__(self, text):
-        # pour _umls_cuis_from_text
         cuis = self._text_to_cuis.get(text, [])
         ents = [FakeEnt([(c, 1.0) for c in cuis])] if cuis else []
         return FakeDoc(ents)
-
-
-# --- Fakes NLI (tokenizer + classifier) ---
 
 
 class FakeTok:
@@ -102,7 +89,6 @@ class FakeTok:
         padding=True,
         max_length=512,
     ):
-        # Retourne un objet compatible .to(self.device) qui donne un dict pour le modèle
         return SimpleNamespace(
             to=lambda device: {"input_ids": torch.tensor([[1, 2, 3]])}
         )
@@ -110,87 +96,57 @@ class FakeTok:
 
 class FakeClf:
     def __init__(self):
-        # Ordre classique MNLI : 0=entailment, 1=neutral, 2=contradiction (on met des logits simples)
         self.config = SimpleNamespace(
             id2label={0: "ENTAILMENT", 1: "NEUTRAL", 2: "CONTRADICTION"}
         )
-        self.eval_called = False
 
-    def eval(self):
-        self.eval_called = True
-
+    def eval(self): ...
     def to(self, device):
         return self
 
     def __call__(self, **inputs):
-        # Logits préférant entailment
-        logits = torch.tensor([[5.0, 3.0, 1.0]])
-        return SimpleNamespace(logits=logits)
+        return SimpleNamespace(
+            logits=torch.tensor([[1.0, 1.0, 1.0]])
+        )  # égalité, peu importe pour ces tests
 
 
-# ----------------------------- Fixtures / patches -----------------------------
+# ----------------------------- Fixtures / patches minimales -----------------------------
 
 
 @pytest.fixture
 def base_df():
-    # 3 lignes : 1) listes directes, 2) strings JSON, 3) vides (NaN)
     return pd.DataFrame(
         {
             "full_note": [
-                "Pain in chest. Shortness of breath.",
-                "Patient feels better. Discharged.",
+                "Line1\nLine2",
+                "Something",
                 "",
-            ],
-            "Symptoms": [
-                ["chest pain", "dyspnea"],  # liste directe
-                json.dumps(["nausea", "vomiting"]),  # string JSON
-                np.nan,  # vide
-            ],
-            "MedicalConclusion": [
-                "myocardial infarction; angina",  # string à split
-                json.dumps(["recovery"]),  # string JSON
-                np.nan,
-            ],
-            "Treatments": [["aspirin"], "PPI, rest", np.nan],  # liste  # string à split
-            "Summary": [
-                "Chest pain treated with aspirin.",
-                "",  # vide -> sera repris depuis __h
-                "",
-            ],
+            ],  # lignes pensées pour _normalize_for_sentences + NLI skip
+            "Symptoms": [np.nan, np.nan, np.nan],
+            "MedicalConclusion": [np.nan, np.nan, np.nan],
+            "Treatments": [np.nan, np.nan, np.nan],
+            "Summary": ["", "", ""],  # forcer fallback via __h si besoin
         }
     )
 
 
 @pytest.fixture
 def pipe_obj(monkeypatch, base_df):
-    # Fake SciSpaCy : les termes normalisés "chest pain" et "aspirin" matchent
-    term_ok_map = {
-        "chest pain": True,
-        "dyspnea": False,
-        "nausea": True,
-        "vomiting": False,
-        "myocardial infarction": True,
-        "angina": False,
-        "aspirin": True,
-        "ppi": False,
-        "rest": False,
-    }
-    # Fake CUI extraction sur textes complets (source/résumé)
-    text_to_cuis = {
-        "Pain in chest. Shortness of breath.": ["C001"],  # source
-        "Chest pain treated with aspirin.": ["C001", "C002"],  # résumé
-        "S": ["C002"],  # fallback Summary depuis __h
-        "Patient feels better. Discharged.": ["C003"],  # source ligne 1
-        "": [],  # ligne vide
-    }
-    fake_sci = FakeSciNLP(term_to_ok=term_ok_map, text_to_cuis=text_to_cuis)
+    # SciSpaCy fake minimal
+    fake_sci = FakeSciNLP(
+        term_to_ok={"a": True},
+        text_to_cuis={
+            "Line1. Line2": {"C1"},  # après normalisation, deux phrases → CUIs
+            "S": {"C2"},
+            "Something": {"C1"},
+            "": set(),
+        },
+    )
 
-    # Patch _ensure_scispacy pour court-circuiter import et chargement
     def fake_ensure_scispacy(self):
         self._sci = fake_sci
         return self._sci
 
-    # Patch _ensure_nlp pour découpage de phrases très simple (split par '.')
     def fake_ensure_nlp(self):
         class _N:
             def __call__(self, txt):
@@ -209,12 +165,11 @@ def pipe_obj(monkeypatch, base_df):
 
         self._nlp = _N()
 
-    # Patch NLI loader
     def fake_ensure_nli(self):
         self._tok = FakeTok()
         self._clf = FakeClf()
-        self.device = "cpu"
         self._id2label = {0: "entailment", 1: "neutral", 2: "contradiction"}
+        self.device = "cpu"
         return self._tok, self._clf, self._id2label
 
     monkeypatch.setattr(
@@ -224,226 +179,101 @@ def pipe_obj(monkeypatch, base_df):
     monkeypatch.setattr(Pipeline, "_ensure_nli", fake_ensure_nli, raising=False)
 
     ds = FakeDataset(base_df.copy())
-    m_h = FakeModelH(prompt=None)  # force le fallback build_prompt_h()
-    p = Pipeline(ds, m_h)
-
-    # Après homogenize(), on aura __h avec JSON {"Symptoms":["A"],"Treatments":["T"],"Summary":"S"}
+    p = Pipeline(ds, FakeModelH())
     return p
 
 
-# ----------------------------- Tests -----------------------------
+# ----------------------------- Tests de branches manquantes -----------------------------
 
 
-def test_homogenize_builds_prompt_and_calls_model(pipe_obj):
+def test_normalize_for_sentences_variants(pipe_obj):
     p = pipe_obj
-    # Avant : pas de dataset_h, pas de prompt
-    assert p.dataset_h is None
-    assert p.model_h.prompt is None
+    # \r\n, \r, \\n, retours sans ponctuation, espaces multiples
+    txt = "A\r\nB\rC\\nD\nE  \nF!\n  \nG?\nH"
+    out = p._normalize_for_sentences(txt)
+    # Doit contenir des points ajoutés et espaces compressés
+    assert "A. B. C. D. E F! G? H" in out or out.startswith(
+        "A."
+    )  # tolérant sur l’exact
 
+
+def test_save_row_stats_image_errors_and_index(pipe_obj, tmp_path):
+    p = pipe_obj
     p.homogenize()
-
-    # Le prompt a été construit
-    assert isinstance(p.model_h.prompt, str) and '"Symptoms": []' in p.model_h.prompt
-    # dataset_h défini et colonne __h présente
-    out_col = f"{p.dataset.field}__h"
-    assert out_col in p.dataset_h.data.columns
-    # run appelé avec bon nom de colonne
-    assert p.model_h.calls[-1]["output_col"] == out_col
+    # ligne 0 : aucune métrique → ValueError
+    with pytest.raises(ValueError):
+        p.save_row_stats_image(0, path=str(tmp_path / "x.png"))
+    # index hors bornes
+    with pytest.raises(IndexError):
+        p.save_row_stats_image(99)
 
 
-def test_umls_extract_entity_list_all_paths(pipe_obj):
+def test_get_summary_text_invalid_json_and_dict_payload(pipe_obj):
     p = pipe_obj
     p.homogenize()
     out_h_col = f"{p.dataset.field}__h"
-    row0 = p.dataset_h.data.iloc[0].copy()
-    row1 = p.dataset_h.data.iloc[1].copy()
-    row2 = p.dataset_h.data.iloc[2].copy()
 
-    # 0: Symptoms est une liste -> renvoie nettoyé
-    res0 = p._extract_entity_list(row0, "Symptoms", out_h_col)
-    assert res0 == ["chest pain", "dyspnea"]
+    # Cas 1 : payload string non-JSON -> retourne "" (Summary vide + JSON invalide)
+    row = {"Summary": "", out_h_col: "{not json}"}
+    assert p._get_summary_text(row, out_h_col) == ""
 
-    # 1: MedicalConclusion est un string JSON -> parse en liste
-    res1 = p._extract_entity_list(row1, "MedicalConclusion", out_h_col)
-    assert res1 == ["recovery"]
-
-    # 0: string avec séparateurs -> split
-    res2 = p._extract_entity_list(row0, "MedicalConclusion", out_h_col)
-    assert res2 == ["myocardial infarction", "angina"]
-
-    # 2: valeurs vides -> fallback JSON de __h
-    res3 = p._extract_entity_list(row2, "Treatments", out_h_col)
-    assert res3 == ["T"]
+    # Cas 2 : payload dict -> récupère Summary
+    row2 = {"Summary": "", out_h_col: {"Summary": "FromDict"}}
+    assert p._get_summary_text(row2, out_h_col) == "FromDict"
 
 
-def test_umls_match_bulk_and_cache(pipe_obj):
+def test_umls_cuis_from_text_cache(pipe_obj):
     p = pipe_obj
     p.homogenize()
-    # Première passe : certains termes matchent
-    terms = ["chest pain", "dyspnea", "aspirin"]
-    out1 = p._umls_match_bulk(terms)
-    assert out1 == {"chest pain": True, "dyspnea": False, "aspirin": True}
-    # Cache : si on rejoue, ne relance pas pipe sur ces termes (on ne peut pas mesurer directement,
-    # mais on s'assure que le résultat est identique et que 'terms' déjà vus n'explosent pas)
-    out2 = p._umls_match_bulk(terms)
-    assert out2 == out1
+    # première extraction
+    s1 = p._umls_cuis_from_text("S")
+    assert isinstance(s1, set)
+    # seconde → via cache (on vérifie la présence dans _umls_doc_cache et l’égalité)
+    key = p._norm_term("S")
+    assert key in p._umls_doc_cache
+    s2 = p._umls_cuis_from_text("S")
+    assert s1 == s2
 
 
-def test_verify_QuickUMLS_creates_and_fills_columns(pipe_obj):
+def test_ensure_scispacy_idempotent(pipe_obj):
     p = pipe_obj
-    p.homogenize()
-    p.verify_QuickUMLS()
-    df = p.dataset_h.data
-
-    for short in ("symptoms", "medicalconclusion", "treatments"):
-        for suffix in (
-            "umls_total",
-            "umls_matched",
-            "umls_match_rate",
-            "umls_loss_rate",
-        ):
-            assert f"{short}_{suffix}" in df.columns
-
-    # Lignes avec entités : metrics numériques ou NaN selon cas
-    # (ligne 0: 2 symptoms; ligne 1: 2 depuis strings; ligne 2: fallback via __h)
-    assert df.loc[0, "symptoms_umls_total"] == 2
-    assert df.loc[0, "symptoms_umls_matched"] in (0, 1, 2)
-    # Lignes sans entités -> NaN pour les taux
-    # (dans notre dataset toutes finissent avec qques entités, mais on peut vérifier sur une colonne)
-    assert math.isnan(df.loc[2, "medicalconclusion_umls_match_rate"]) or isinstance(
-        df.loc[2, "medicalconclusion_umls_match_rate"], float
-    )
+    one = p._ensure_scispacy()
+    two = p._ensure_scispacy()
+    assert one is two  # early return couvert
 
 
-def test_verify_UMLS_summary_vs_source(pipe_obj):
-    p = pipe_obj
-    p.homogenize()
-    # Ligne 1 a Summary vide -> sera pris depuis __h ("S")
-    p.verify_UMLS_summary_vs_source()
-    df = p.dataset_h.data
-    for col in [
-        "umls_src_total",
-        "umls_sum_total",
-        "umls_overlap_count",
-        "umls_match_rate",
-        "umls_loss_rate",
-        "umls_creation_rate",
-        "umls_jaccard",
-    ]:
-        assert col in df.columns
-
-    # Vérifie au moins une ligne avec valeurs numériques
-    assert df.loc[0, "umls_src_total"] >= 0
-    assert df.loc[0, "umls_sum_total"] >= 0
-
-
-def test_nli_single_call_and_verify_NLI(pipe_obj, monkeypatch):
+def test_verify_NLI_no_sentences_branch(monkeypatch, pipe_obj, capsys):
     p = pipe_obj
     p.homogenize()
 
-    # Forcer des textes simples (deux phrases chacune) pour NLI
-    df = p.dataset_h.data
-    df.loc[0, "Summary"] = "It is OK. Really OK."
-    df.loc[0, "full_note"] = "OK indeed. Confirmed."
+    # Forcer decouper_texte_en_phrases à renvoyer [] pour déclencher "pas de phrases, skip."
+    monkeypatch.setattr(Pipeline, "decouper_texte_en_phrases", lambda self, txt: [])
+    p.dataset_h.data.loc[0, "full_note"] = "Has text"
+    p.dataset_h.data.loc[0, "Summary"] = "Has summary"
 
-    # Découpage personnalisé (déjà patché dans fixture)
-    # Vérifie un appel direct à nli()
-    out = p.nli("premise here.", "hyp here.")
-    assert out["prediction"] in ("entailment", "neutral", "contradiction")
-    assert set(out["probs"].keys()) == {"entailment", "neutral", "contradiction"}
-
-    # Et maintenant la vérification complète (remplit nli_*_mean)
     p.verify_NLI()
-    assert "nli_ent_mean" in df.columns
-    # Comme nos logits préfèrent entailment, la moyenne doit être > neutral/contra en général
-    assert (df.loc[0, "nli_ent_mean"] is None) or (df.loc[0, "nli_ent_mean"] >= 0.0)
+    out = capsys.readouterr().out
+    assert "pas de phrases, skip." in out
 
 
-def test_generer_table_prettier_average(pipe_obj):
-    import math
-
-    p = pipe_obj
-    lignes = ["h1", "h2"]
-    cols = ["p1", "p2"]
-    # Les deux cellules "meilleures" (h1,p1) et (h2,p2) ont toutes les proba numériques
-    raw = [
-        [
-            {"probs": {"entailment": 0.9, "neutral": 0.05, "contradiction": 0.05}},
-            {"probs": {"entailment": 0.4, "neutral": 0.5, "contradiction": 0.1}},
-        ],
-        [
-            {"probs": {"entailment": 0.2, "neutral": 0.2, "contradiction": 0.6}},
-            {"probs": {"entailment": 0.7, "neutral": 0.2, "contradiction": 0.1}},
-        ],
-    ]
-
-    mat = p.generer_table(
-        lignes, cols, lambda i, j: raw[lignes.index(i)][cols.index(j)]
-    )
-    # Toutes les clés présentes
-    assert all(
-        set(cell.keys()) == {"entailment", "neutral", "contradiction"}
-        for row in mat
-        for cell in row
-    )
-
-    avg = p.average(lignes, cols, mat)
-    assert set(avg.keys()) == {"entailment", "neutral", "contradiction"}
-    assert all(isinstance(avg[k], float) and math.isfinite(avg[k]) for k in avg)
-
-
-def test_save_row_stats_image_and_all_images(pipe_obj, tmp_path):
+def test_save_all_stats_images_limit_and_skip(pipe_obj, tmp_path, monkeypatch):
     p = pipe_obj
     p.homogenize()
-    # Créer des colonnes métriques minimales pour la ligne 0
-    df = p.dataset_h.data
-    df.loc[0, "nli_ent_mean"] = 0.8
-    df.loc[0, "nli_neu_mean"] = 0.1
-    df.loc[0, "nli_con_mean"] = 0.1
-    df.loc[0, "umls_match_rate"] = 0.5
-    df.loc[0, "umls_loss_rate"] = 0.5
-    df.loc[0, "umls_creation_rate"] = 0.0
-    df.loc[0, "umls_jaccard"] = 0.3
+    # Monkeypatch save_row_stats_image pour que 0 crée un fichier, 1 lève ValueError (skip), et on limite à 2
+    calls = {"i": -1}
 
-    # et pour la ligne 1, rien -> save_all devrait skipper proprement
-    # Sauvegarde image pour la ligne 0
-    out_path = tmp_path / "row0.png"
-    got = p.save_row_stats_image(0, path=str(out_path))
-    assert os.path.exists(got) and got.endswith("row0.png")
+    def fake_save(i, path=None):
+        calls["i"] = i
+        if i == 0:
+            path = path or f"row_{i}_stats.png"
+            with open(path, "wb") as f:
+                f.write(b"")
+            return path
+        raise ValueError("no metrics")
 
-    # save_all_stats_images (limité à 2 pour aller vite)
-    paths = p.save_all_stats_images(limit=2)
-    # au moins une image créée (ligne 0), ligne 1 peut être skippée (aucune métrique)
-    assert any(os.path.exists(pth) for pth in paths)
-
-
-def test_to_excel_exports_file(pipe_obj, tmp_path, monkeypatch):
-    import os
-    import pandas as pd
-
-    p = pipe_obj
-    p.homogenize()
-
-    # Écrire dans un répertoire temporaire
+    monkeypatch.setattr(Pipeline, "save_row_stats_image", fake_save)
+    # cwd temporaire
     monkeypatch.chdir(tmp_path)
 
-    # Monkeypatch de DataFrame.to_excel pour éviter la dépendance openpyxl
-    def fake_to_excel(self, path, index=False):
-        with open(path, "wb") as f:
-            f.write(b"")  # fichier vide suffisant pour le test
-
-    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel, raising=False)
-
-    out = p.to_excel()
-    assert out == "dataset_h.xlsx"
-    assert os.path.exists(out)
-
-
-def test_apply_full_orchestration(pipe_obj, capsys):
-    p = pipe_obj
-    out = p.apply()
-    # apply retourne dataset_h
-    assert out is p.dataset_h
-    # On vérifie que le log final apparait
-    stdout = capsys.readouterr().out
-    assert "[Pipeline] Pipeline completed." in stdout
+    paths = p.save_all_stats_images(limit=2)
+    assert len(paths) == 1 and os.path.exists(paths[0])

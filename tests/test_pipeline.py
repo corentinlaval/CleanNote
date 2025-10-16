@@ -360,14 +360,23 @@ def test_nli_single_call_and_verify_NLI(pipe_obj, monkeypatch):
 
 
 def test_generer_table_prettier_average(pipe_obj):
+    import math
+
     p = pipe_obj
-    # matrice 2x2 avec des dicts partiels -> _prettier complète les clés à None
     lignes = ["h1", "h2"]
     cols = ["p1", "p2"]
+    # Les deux cellules "meilleures" (h1,p1) et (h2,p2) ont toutes les proba numériques
     raw = [
-        [{"probs": {"entailment": 0.9}}, {"probs": {"neutral": 0.5}}],
-        [{"probs": {"contradiction": 0.2}}, {"probs": {"entailment": 0.7}}],
+        [
+            {"probs": {"entailment": 0.9, "neutral": 0.05, "contradiction": 0.05}},
+            {"probs": {"entailment": 0.4, "neutral": 0.5, "contradiction": 0.1}},
+        ],
+        [
+            {"probs": {"entailment": 0.2, "neutral": 0.2, "contradiction": 0.6}},
+            {"probs": {"entailment": 0.7, "neutral": 0.2, "contradiction": 0.1}},
+        ],
     ]
+
     mat = p.generer_table(
         lignes, cols, lambda i, j: raw[lignes.index(i)][cols.index(j)]
     )
@@ -380,8 +389,7 @@ def test_generer_table_prettier_average(pipe_obj):
 
     avg = p.average(lignes, cols, mat)
     assert set(avg.keys()) == {"entailment", "neutral", "contradiction"}
-    # Valeurs numériques ou None (si pas de meilleures colonnes)
-    assert avg["entailment"] is None or avg["entailment"] >= 0.0
+    assert all(isinstance(avg[k], float) and math.isfinite(avg[k]) for k in avg)
 
 
 def test_save_row_stats_image_and_all_images(pipe_obj, tmp_path):
@@ -410,13 +418,25 @@ def test_save_row_stats_image_and_all_images(pipe_obj, tmp_path):
 
 
 def test_to_excel_exports_file(pipe_obj, tmp_path, monkeypatch):
+    import os
+    import pandas as pd
+
     p = pipe_obj
     p.homogenize()
-    # rediriger cwd vers tmp pour ne pas polluer le repo
+
+    # Écrire dans un répertoire temporaire
     monkeypatch.chdir(tmp_path)
+
+    # Monkeypatch de DataFrame.to_excel pour éviter la dépendance openpyxl
+    def fake_to_excel(self, path, index=False):
+        with open(path, "wb") as f:
+            f.write(b"")  # fichier vide suffisant pour le test
+
+    monkeypatch.setattr(pd.DataFrame, "to_excel", fake_to_excel, raising=False)
+
     out = p.to_excel()
-    assert os.path.exists(out)
     assert out == "dataset_h.xlsx"
+    assert os.path.exists(out)
 
 
 def test_apply_full_orchestration(pipe_obj, capsys):

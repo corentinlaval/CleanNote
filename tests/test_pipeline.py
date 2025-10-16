@@ -259,17 +259,20 @@ def test_verify_NLI_no_sentences_branch(monkeypatch, pipe_obj, capsys):
 def test_save_all_stats_images_limit_and_skip(pipe_obj, tmp_path, monkeypatch):
     p = pipe_obj
     p.homogenize()
+    # Monkeypatch save_row_stats_image pour que 0 crée un fichier, 1 lève ValueError (skip), et on limite à 2
+    calls = {"i": -1}
 
-    # Monkeypatch save_row_stats_image : pour i==0 on crée un fichier, sinon on lève ValueError
-    def fake_save(self, i, path=None):  # <-- IMPORTANT: ajoute self
+    def fake_save(i, path=None):
+        calls["i"] = i
         if i == 0:
-            pth = path or f"row_{i}_stats.png"
-            with open(pth, "wb") as f:
+            path = path or f"row_{i}_stats.png"
+            with open(path, "wb") as f:
                 f.write(b"")
-            return pth
+            return path
         raise ValueError("no metrics")
 
     monkeypatch.setattr(Pipeline, "save_row_stats_image", fake_save)
+    # cwd temporaire
     monkeypatch.chdir(tmp_path)
 
     paths = p.save_all_stats_images(limit=2)

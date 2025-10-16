@@ -238,11 +238,11 @@ def test_get_summary_text_variants_and_cuis_cache(monkeypatch):
 
     # cache CUIs
     # on monkeypatch __call__ pour renvoyer un ent avec kb_ents
-    def sci_call(txt):
+    def sci_call(self, txt):
         ent = SimpleNamespace(_=SimpleNamespace(kb_ents=[("C1", 1.0)]))
         return SimpleNamespace(ents=[ent])
 
-    p._sci.__call__ = sci_call
+    p._sci.__class__.__call__ = sci_call
     s1 = p._umls_cuis_from_text("Hello")
     assert s1 == {"C1"}
     # seconde fois -> via cache
@@ -274,7 +274,7 @@ def test_save_all_stats_images_limit_and_skip(tmp_path, monkeypatch):
     p = Pipeline(FakeDataset(pd.DataFrame({"full_note": ["x", "y"]})), FakeModelH())
     p.homogenize()
 
-    def fake_save(i, path=None):
+    def fake_save(self, i, path=None):  # <= self ajouté
         if i == 0:
             path = path or f"row_{i}_stats.png"
             with open(path, "wb") as f:

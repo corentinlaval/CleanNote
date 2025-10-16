@@ -19,15 +19,15 @@
 
 **CleanNote** analyzes raw medical notes and transforms them into concise, structured documents focused on symptoms, medical conclusions, and treatments, enabling easier analysis and clinical research.
 
-This solution was developed during a research internship at the **** laboratory, and is currently demonstrated using the **AGBonnet/Augmented-clinical-notes** dataset together with the **mistralai/Mistral-7B-Instruct-v0.3** model.
+This solution was developed during a research internship at the Hubert Curien laboratory, and is currently demonstrated using the **AGBonnet/Augmented-clinical-notes** dataset together with the **mistralai/Mistral-7B-Instruct-v0.3** model.
 
 This work was supervised by three people:
 
-- **Ms.** ****, company supervisor and associate professor, who proposed the topic of the preprocessing pipeline,
+- **Ms.** Combes Catherine, company supervisor and associate professor, who proposed the topic of the preprocessing pipeline,
 
-- **Ms.** ****, school supervisor and associate professor, who guided me on frugality aspects and formatting,
+- **Ms.** Fresse Virginie, school supervisor and associate professor, who guided me on frugality aspects and formatting,
 
-- **Mr.** ****, PhD student, who provided support on identifying adapted solutions and domain knowledge.
+- **Mr.** ****, PhD Hatoum Carl, who provided support on identifying adapted solutions and domain knowledge.
 
 ---
 
@@ -64,28 +64,44 @@ The latest released version is always displayed in the PyPI badge at the top of 
 After installation, you can using **CleanNote** with just few lines of code:
 
 ```bash
+from cleanote.pipeline import Pipeline
 from cleanote.dataset import Dataset
 from cleanote.model import Model
-from cleanote.pipeline import Pipeline
 
-# Load a dataset
-data = Dataset(name="AGBonnet/Augmented-clinical-notes", split="train", field="full_note", limit=1)
+data = Dataset(name="AGBonnet/Augmented-clinical-notes", split="train", field="full_note", limit=20)
 
-# Load a model
-model = Model(name="mistralai/Mistral-7B-Instruct-v0.3", max_new_tokens=512)
+prompt = """Analyze the document below and return a single, valid JSON object with exactly these keys (no trailing commas):
+        {{
+            "Symptoms": [/* list of symptoms extracted from the document */],
+            "MedicalConclusion": [/* list of medical conclusion extracted from the document */],
+            "Treatments": [/* list of treatments extracted from the document */],
+            "Summary": "/* a professional paragraph summarizing the note, that mentions only items already listed in Symptoms, MedicalConclusion, and Treatments, without inventing anything */"
+        }}
 
-# Create pipeline
-pipe = Pipeline(dataset=data, model_h=model)
+            - If no information exists for a given key, return "none" for that key.
+            - The Summary field **must use only** the items already extracted above and **must not add** any new facts.
+            - Ensure the output is **syntactically valid JSON**.
 
-# Run pipeline
+            Document:
+            """
+
+ml_h = Model(
+    name="mistralai/Mistral-7B-Instruct-v0.3",
+    task="text-generation",
+    prompt=prompt,
+    max_new_tokens=1024,   
+    do_sample=False,
+    temperature=0.0,
+    top_p=1.0)
+
+pipe = Pipeline(dataset=data, model_h = ml_h)
+
 out = pipe.apply()
 
-# Display result
-print(out.data.head())
+pipe.save_all_stats_images(limit=20)
 
-# Download the dataset homogenized
 xls = pipe.to_excel()  
-print(f"Excel file saved to : {xls}")
+print(f"Excel file saved : {xls}")
 
 ```
 ---
@@ -113,15 +129,15 @@ print(f"Excel file saved to : {xls}")
 
 **CleanNote** analyse des notes médicales brutes et les transforme en documents concis et structurés, centrés sur les symptômes, les conclusions médicales et les traitements, afin de faciliter leur analyse et la recherche clinique.
 
-Cette solution a été développée dans le cadre d’un stage de recherche au laboratoire **** , et est actuellement démontrée à l’aide du jeu de données **AGBonnet/Augmented-clinical-notes** ainsi que du modèle **mistralai/Mistral-7B-Instruct-v0.3**.
+Cette solution a été développée dans le cadre d’un stage de recherche au laboratoire Hubert Curien , et est actuellement démontrée à l’aide du jeu de données **AGBonnet/Augmented-clinical-notes** ainsi que du modèle **mistralai/Mistral-7B-Instruct-v0.3**.
 
 Ce travail a été supervisé par trois personnes :
 
-- **Mme** ****, tutrice entreprise et maîtresse de conférences, qui a proposé le sujet du pipeline de prétraitement,
+- **Mme** Combes Catherine, tutrice entreprise et maîtresse de conférences, qui a proposé le sujet du pipeline de prétraitement,
 
-- **Mme** ****, tutrice école et maîtresse de conférences, qui m’a encadré sur les aspects de frugalité et de mise en forme,
+- **Mme** Fresse Virginie, tutrice école et maîtresse de conférences, qui m’a encadré sur les aspects de frugalité et de mise en forme,
 
-- **M.** ****, doctorant, qui m’a accompagné sur l’identification des solutions adaptées et l’apport de connaissances du domaine.
+- **M.** Hatoum Carl, doctorant, qui m’a accompagné sur l’identification des solutions adaptées et l’apport de connaissances du domaine.
 
 ---
 
@@ -158,28 +174,45 @@ La dernière version publiée est toujours affichée dans le badge PyPI en haut 
 Après installation, vous pouvez utiliser **CleanNote** en seulement quelques lignes de code :
 
 ```bash
+from cleanote.pipeline import Pipeline
 from cleanote.dataset import Dataset
 from cleanote.model import Model
-from cleanote.pipeline import Pipeline
 
-# Charger un jeu de données
-data = Dataset(name="AGBonnet/Augmented-clinical-notes", split="train", field="full_note", limit=1)
+data = Dataset(name="AGBonnet/Augmented-clinical-notes", split="train", field="full_note", limit=20)
 
-# Charger un modèle
-model = Model(name="mistralai/Mistral-7B-Instruct-v0.3", max_new_tokens=512)
+prompt = """Analyze the document below and return a single, valid JSON object with exactly these keys (no trailing commas):
+        {{
+            "Symptoms": [/* list of symptoms extracted from the document */],
+            "MedicalConclusion": [/* list of medical conclusion extracted from the document */],
+            "Treatments": [/* list of treatments extracted from the document */],
+            "Summary": "/* a professional paragraph summarizing the note, that mentions only items already listed in Symptoms, MedicalConclusion, and Treatments, without inventing anything */"
+        }}
 
-# Créer le pipeline
-pipe = Pipeline(dataset=data, model_h=model)
+            - If no information exists for a given key, return "none" for that key.
+            - The Summary field **must use only** the items already extracted above and **must not add** any new facts.
+            - Ensure the output is **syntactically valid JSON**.
 
-# Lancer le pipeline
+            Document:
+            """
+
+ml_h = Model(
+    name="mistralai/Mistral-7B-Instruct-v0.3",
+    task="text-generation",
+    prompt=prompt,
+    max_new_tokens=1024,   
+    do_sample=False,
+    temperature=0.0,
+    top_p=1.0)
+
+pipe = Pipeline(dataset=data, model_h = ml_h)
+
 out = pipe.apply()
 
-# Afficher le résultat
-print(out.data.head())
+pipe.save_all_stats_images(limit=20)
 
-# Exporter le jeu de données homogénéisé
 xls = pipe.to_excel()  
-print(f"Fichier Excel sauvegardé : {xls}")
+print(f"Excel file saved : {xls}")
+
 ```
 
 ---

@@ -1,7 +1,6 @@
 import logging
 from typing import Iterable, Callable, Dict, List, Optional, Any
 
-import math
 import matplotlib.pyplot as plt
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -98,7 +97,7 @@ class Pipeline:
 
         try:
             import scispacy  # noqa: F401
-            from scispacy.umls_linking import UmlsEntityLinker
+            from scispacy.umls_linking import UmlsEntityLinker  # noqa: F401
         except Exception as e:
             raise RuntimeError(
                 "SciSpaCy n'est pas installé (pip install scispacy)."

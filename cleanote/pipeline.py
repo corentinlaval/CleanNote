@@ -1,6 +1,7 @@
 import logging
 from typing import Iterable, Callable, Dict, List, Optional, Any
 
+from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -16,15 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class Pipeline:
-    """
-    Pipeline de prétraitement/validation.
-    `dataset` doit exposer:
-      - `field`: nom de la colonne texte à traiter
-      - `data`: DataFrame (utilisée par to_excel)
-    `model_h` doit exposer:
-      - `prompt`: str | None
-      - `run(dataset, output_col=...)` -> retourne un objet compatible avec `dataset_h`
-    """
 
     NLI_MODEL_NAME = "pritamdeka/PubMedBERT-MNLI-MedNLI"
 
@@ -74,7 +66,6 @@ class Pipeline:
 
     @staticmethod
     def build_prompt_h() -> str:
-        # Retourne un prompt JSON clair et valide
         return (
             "Analyze the document below and return a single, valid JSON object with exactly these keys:\n"
             "{\n"
@@ -255,10 +246,10 @@ class Pipeline:
                 df[col] = np.nan
 
         for idx, row in df.iterrows():
-            # Texte source (comme src_sents dans Colab)
+            # Texte source
             src_text = (row.get(text_col) or "").strip()
 
-            # Résumé/hypothèses (comme sum_sents dans Colab)
+            # Résumé/hypothèses
             summ_text = (row.get("Summary") or "").strip()
             if not summ_text and out_h_col in df.columns:
                 try:
@@ -284,7 +275,6 @@ class Pipeline:
                 print(f"[Pipeline] Row {idx}: pas de phrases, skip.")
                 continue
 
-            # Comme Colab: lignes = résumé, colonnes = source; nli(premise=src, hypothesis=sum)
             matrice = self.generer_table(
                 hypotheses,
                 premises,
@@ -570,22 +560,111 @@ class Pipeline:
         plt.close()
         return path
 
-    def save_all_stats_images(self, limit: Optional[int] = None) -> List[str]:
+    # (optionnel) nom de fichier safe
+    def _safe_filename(self, s: str) -> str:
+        s = re.sub(r"[^\w\-.]+", "_", (s or "").strip())[:60]
+        return s or "row"
+
+    def _metric_category(self, label: str) -> str:
+        """Retourne la catégorie d'une métrique pour colorer."""
+        if label.startswith("NLI"):
+            return "NLI"
+        if label.startswith("UMLS – "):
+            return "UMLS"
+        if label.startswith("Symptoms"):
+            return "Symptoms"
+        if label.startswith("MedConclusion"):
+            return "MedicalConclusion"
+        if label.startswith("Treatments"):
+            return "Treatments"
+        return "Other"
+
+    def _category_color(self, cat: str) -> str:
+        """Couleur par catégorie (palette tab:* de Matplotlib)."""
+        palette = {
+            "NLI": "tab:blue",
+            "UMLS": "tab:orange",
+            "Symptoms": "tab:green",
+            "MedicalConclusion": "tab:purple",
+            "Treatments": "tab:red",
+            "Other": "tab:gray",
+        }
+        return palette.get(cat, "tab:gray")
+
+    def save_row_stats_image(self, idx: int, path: Optional[str] = None) -> str:
         """
-        Génère un PNG par ligne. `limit` permet de borner le nombre d'images.
-        Retourne la liste des chemins générés.
+        Sauve un graphique PNG des métriques (NLI + UMLS) pour la ligne `idx`, avec couleurs par catégorie.
         """
-        n = len(self.dataset_h.data)
-        if limit is not None:
-            n = min(n, int(limit))
-        paths = []
-        for i in range(n):
-            try:
-                p = self.save_row_stats_image(i)
-                paths.append(p)
-            except Exception as e:
-                print(f"[stats-img] ligne {i} ignorée ({e})")
-        return paths
+        df = self.dataset_h.data
+        if idx < 0 or idx >= len(df):
+            raise IndexError(f"idx {idx} hors limites (0..{len(df)-1})")
+
+        row = df.iloc[idx]
+        metrics = self._row_metrics_dict(row)
+
+        labels = list(metrics.keys())
+        values = [metrics[k] for k in labels]
+
+        # filtre None
+        items = [(lab, val) for lab, val in zip(labels, values) if val is not None]
+        if not items:
+            raise ValueError("Aucune métrique disponible pour cette ligne.")
+
+        labels, values = zip(*items)
+        values = [max(0.0, min(1.0, float(v))) for v in values]
+
+        # couleurs par catégorie
+        cats = [self._metric_category(lab) for lab in labels]
+        colors = [self._category_color(c) for c in cats]
+
+        # chemin
+        if path is None:
+            title_left = row.get(self.dataset.field, "")
+            base = self._safe_filename(
+                title_left if isinstance(title_left, str) else f"row_{idx}"
+            )
+            path = f"{base}_row_{idx}_stats.png"
+
+        # plot
+        plt.figure(figsize=(10, max(4, 0.45 * len(labels))))
+        y_pos = range(len(labels))
+        plt.barh(y_pos, values, color=colors)
+        plt.yticks(y_pos, labels)
+        plt.xlim(0, 1)
+        plt.xlabel("Score [0–1]")
+
+        title_left = row.get(self.dataset.field, "")
+        title_left = (
+            (title_left[:80] + "…")
+            if isinstance(title_left, str) and len(title_left) > 80
+            else title_left
+        )
+        plt.title(f"Stats – ligne {idx} | {title_left}")
+
+        # annotations
+        for y, v in enumerate(values):
+            plt.text(
+                v + 0.01 if v <= 0.9 else v - 0.15,
+                y,
+                f"{v:.3f}",
+                va="center",
+                ha="left" if v <= 0.9 else "right",
+            )
+
+        # légende
+        legend_items = []
+        seen = set()
+        for cat, col in zip(cats, colors):
+            if cat not in seen:
+                legend_items.append(Patch(facecolor=col, edgecolor="none", label=cat))
+                seen.add(cat)
+        if legend_items:
+            plt.legend(handles=legend_items, loc="lower right")
+
+        plt.tight_layout()
+        plt.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close()
+        return path
 
     def generer_table(
         self,

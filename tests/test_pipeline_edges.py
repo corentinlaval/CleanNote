@@ -5,7 +5,6 @@ import json
 import os
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 import pytest
 import torch

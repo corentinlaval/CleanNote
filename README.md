@@ -27,7 +27,7 @@ This work was supervised by three people:
 
 - **Ms.** Fresse Virginie, school supervisor and associate professor, who guided me on frugality aspects and formatting,
 
-- **Mr.** ****, PhD Hatoum Carl, who provided support on identifying adapted solutions and domain knowledge.
+- **Mr.** Hatoum Carl, PhD student, who provided support on identifying adapted solutions and domain knowledge.
 
 ---
 
